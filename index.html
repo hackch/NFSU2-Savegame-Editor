@@ -156,6 +156,26 @@
         if (p < u8.length) u8[p] = val;
       }
     }
+    function isSlotLocked(u8, slotIdx) {
+      const base = START_IDX + slotIdx * SLOT_SIZE;
+      for (let i = 0; i < 16; i++) {
+        if (u8[base + i] !== 0) return false;
+      }
+      return true;
+    }
+
+    function unlockCarSlot(u8, slotIdx) {
+      const slot0Base = START_IDX;
+      const targetBase = START_IDX + slotIdx * SLOT_SIZE;
+      // Copy header from slot 0
+      for (let i = 0; i < 16; i++) {
+        u8[targetBase + i] = u8[slot0Base + i];
+      }
+      // Zero the rest
+      for (let i = 16; i < SLOT_SIZE; i++) {
+        u8[targetBase + i] = 0;
+      }
+    }
 
     const fileInput = $('#file');
     const fileInfo = $('#fileInfo');
@@ -208,20 +228,38 @@
       if(backupToggle.checked){ dlBakBtn.disabled = false; }
 
       carsDiv.innerHTML = '';
-      for(let i=0;i<NUM_SLOTS;i++){
+      for (let i = 0; i < NUM_SLOTS; i++) {
+        const base = START_IDX + i * SLOT_SIZE;
         const inUse = i < usedSlots;
+        const locked = isSlotLocked(workBuf, i);
         const card = document.createElement('div');
         card.className = 'card';
         card.innerHTML = `
-          <div><strong>Car ${i+1}</strong> <span class="muted">${inUse? 'IN USE' : 'empty'}</span></div>
+          <div><strong>Car ${i + 1}</strong> <span class="muted">${inUse ? 'IN USE' : locked ? 'locked/empty' : 'empty'}</span></div>
           <label class="muted" for="car_${i}">Change performance</label>
-          <select id="car_${i}" ${inUse? '' : 'disabled'}>
+          <select id="car_${i}" ${inUse ? '' : 'disabled'}>
             <option value="2">No effect</option>
             <option value="0">Nill out</option>
             <option value="1">Max out</option>
           </select>
+          ${(!inUse && locked) ? `<button id="unlock_${i}" style="margin-top:8px">Unlock Slot</button>` : ''}
         `;
         carsDiv.appendChild(card);
+
+        // Add unlock button handler if needed
+        if (!inUse && locked) {
+          setTimeout(() => {
+            const btn = document.getElementById(`unlock_${i}`);
+            if (btn) {
+              btn.onclick = () => {
+                unlockCarSlot(workBuf, i);
+                // Refresh UI
+                fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+                alert(`Car Slot ${i + 1} unlocked!`);
+              };
+            }
+          }, 0);
+        }
       }
 
       nameField.value = '';
