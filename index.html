@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NFSU2 Save Editor (Offline)</title>
+  <style>
+    :root { --bg:#0f1220; --panel:#171a2b; --muted:#98a2b3; --text:#e5e7eb; --accent:#60a5fa; }
+    html,body{height:100%}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;background:var(--bg);color:var(--text);}
+    .wrap{max-width:900px;margin:0 auto;padding:24px;}
+    h1{font-size:clamp(20px,3vw,28px);margin:0 0 8px}
+    .sub{color:var(--muted);margin-bottom:16px}
+    .card{background:var(--panel);border:1px solid #22263e;border-radius:16px;padding:16px;margin:12px 0;box-shadow:0 4px 24px rgba(0,0,0,.25)}
+    .row{display:flex;gap:12px;flex-wrap:wrap}
+    label{display:block;font-weight:600;margin-bottom:6px}
+    input[type="file"],input[type="number"],input[type="text"],select,button{background:#0e1224;border:1px solid #252b45;color:var(--text);border-radius:10px;padding:10px 12px}
+    input[type="number"],input[type="text"],select{width:100%}
+    button{cursor:pointer}
+    button.primary{background:linear-gradient(180deg,#2563eb,#1d4ed8);border:0}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+    .muted{color:var(--muted)}
+    .pill{display:inline-block;padding:4px 8px;border-radius:999px;background:#0b1022;border:1px solid #2a3053;font-size:12px}
+    .warn{color:#fbbf24}
+    .ok{color:#34d399}
+    details{border:1px dashed #2a3053;border-radius:12px;padding:10px}
+    code{background:#0b1022;border:1px solid #2a3053;padding:2px 6px;border-radius:6px}
+    .footer{margin-top:18px;font-size:12px;color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>NFS Underground 2 – Save Editor (100% client‑side)</h1>
+    <div class="sub">Open a save file, tweak name, money and car performance, then download the modified file. No uploads; everything stays in your browser.</div>
+
+    <div class="card">
+      <div class="grid">
+        <div>
+          <label for="file">Save file</label>
+          <input id="file" type="file" accept="*/*" />
+          <div class="muted" id="fileInfo">No file selected.</div>
+        </div>
+        <div>
+          <label>&nbsp;</label>
+          <label class="muted"><input id="backupToggle" type="checkbox" checked /> Create .bak backup on load</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="summary" hidden>
+      <div class="grid">
+        <div>
+          <div class="muted">Profile Name</div>
+          <div id="profile" class="pill">—</div>
+        </div>
+        <div>
+          <div class="muted">Money</div>
+          <div id="moneyDisplay" class="pill">—</div>
+        </div>
+        <div>
+          <div class="muted">Car Slots Used</div>
+          <div id="slots" class="pill">—</div>
+        </div>
+        <div>
+          <div class="muted">Header Check</div>
+          <div id="headerStatus" class="pill">—</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="editor" hidden>
+      <div class="grid">
+        <div>
+          <label for="name">New Profile Name (leave empty = no change)</label>
+          <input id="name" type="text" maxlength="32" />
+        </div>
+        <div>
+          <label for="money">New Money (‑1 = no change)</label>
+          <input id="money" type="number" step="1" />
+        </div>
+      </div>
+      <div style="height:12px"></div>
+      <div class="grid" id="cars"></div>
+      <div style="height:12px"></div>
+      <div class="row">
+        <button id="apply" class="primary" disabled>Apply Changes</button>
+        <button id="download" disabled>Download Modified Save</button>
+        <button id="downloadBak" disabled>Download Backup (.bak)</button>
+        <button id="reload">Reset (re‑read file)</button>
+      </div>
+      <div class="footer">Offsets & logic mirror the shared C++: magic <code>"20CM"</code> at <code>0x0</code>, size low‑bytes at <code>0x4</code>, money <code>int32</code> at <code>0xA16A</code>, name at <code>0xD225</code>, cars region starting <code>0x5AEC</code> (5 slots × <code>0x7F2</code>), performance block starts at <code>+0x94</code> for <code>0x44</code> bytes.</div>
+    </div>
+
+    <details class="card">
+      <summary>How it works (safety & compatibility)</summary>
+      <ul>
+        <li>Everything runs locally in your browser using <code>ArrayBuffer</code>/<code>DataView</code>. No data leaves your device.</li>
+        <li>Validation checks: header magic and two low‑order bytes of file size (to mimic the original C++ <code>memcmp</code> behavior).</li>
+        <li>Backups: if enabled, you can download a verbatim <code>.bak</code> copy of the original bytes.</li>
+      </ul>
+    </details>
+  </div>
+
+  <script>
+    const MAGIC = [0x32,0x30,0x43,0x4D];
+    const MONEY_OFF = 0xA16A;
+    const NAME_OFF = 0xD225;
+    const START_IDX = 0x5AEC;
+    const SLOT_SIZE = 0x7F2;
+    const NUM_SLOTS = 5;
+    const PERF_OFFSET_IN_SLOT = 0x94;
+    const PERF_COUNT = 0x44;
+
+    let fileHandle = null;
+    let originalBuf = null;
+    let workBuf = null;
+    let dv = null;
+    let usedSlots = 0;
+
+    const $ = sel => document.querySelector(sel);
+    const setText = (id, txt) => { const el = $(id); el.textContent = txt; };
+    function readCString(u8, offset){
+      let end = offset;
+      while (end < u8.length && u8[end] !== 0) end++;
+      return new TextDecoder("windows-1252", {fatal:false}).decode(u8.subarray(offset, end));
+    }
+    function writeCString(u8, offset, str, maxLen=32){
+      const bytes = new TextEncoder().encode(str);
+      for(let i=0;i<maxLen;i++){
+        u8[offset+i] = (i<bytes.length)? bytes[i] : 0;
+      }
+    }
+    function checkHeader(u8, fileSize){
+      for(let i=0;i<4;i++){ if(u8[i] !== MAGIC[i]) return false; }
+      const fileLow16 = fileSize & 0xFFFF;
+      const view = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+      const low16 = view.getUint16(4, true);
+      return low16 === fileLow16;
+    }
+    function calcUsedSlots(u8){
+      let c=0; const view = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+      for(let i=0;i<NUM_SLOTS;i++){
+        const base = START_IDX + i*SLOT_SIZE;
+        if (base+2 <= u8.length){
+          if(view.getUint16(base, true) !== 0) c++;
+        }
+      }
+      return c;
+    }
+    function setPerfForCar(u8, index, val){
+      if(index<0 || index>=NUM_SLOTS) return;
+      const base = START_IDX + index*SLOT_SIZE + PERF_OFFSET_IN_SLOT;
+      for(let i=0;i<PERF_COUNT;i++){
+        const p = base + i;
+        if (p < u8.length) u8[p] = val;
+      }
+    }
+
+    const fileInput = $('#file');
+    const fileInfo = $('#fileInfo');
+    const headerStatus = $('#headerStatus');
+    const profile = $('#profile');
+    const moneyDisplay = $('#moneyDisplay');
+    const slots = $('#slots');
+    const summary = $('#summary');
+    const editor = $('#editor');
+    const nameField = $('#name');
+    const moneyField = $('#money');
+    const carsDiv = $('#cars');
+    const applyBtn = $('#apply');
+    const dlBtn = $('#download');
+    const dlBakBtn = $('#downloadBak');
+    const backupToggle = $('#backupToggle');
+    const reloadBtn = $('#reload');
+
+    function resetUI(){
+      summary.hidden = true; editor.hidden = true; applyBtn.disabled = true; dlBtn.disabled = true; dlBakBtn.disabled = true;
+      carsDiv.innerHTML = ''; setText('#fileInfo','No file selected.');
+    }
+
+    resetUI();
+
+    fileInput.addEventListener('change', async (e)=>{
+      resetUI();
+      const f = e.target.files?.[0];
+      if(!f){ return; }
+      fileHandle = f;
+      fileInfo.textContent = `${f.name} — ${f.size.toLocaleString()} bytes`;
+      const ab = await f.arrayBuffer();
+      originalBuf = new Uint8Array(ab);
+      workBuf = new Uint8Array(ab.slice(0));
+      dv = new DataView(workBuf.buffer);
+
+      const headerOk = checkHeader(workBuf, f.size);
+      headerStatus.textContent = headerOk ? 'OK' : 'Invalid';
+      headerStatus.className = 'pill ' + (headerOk ? 'ok' : 'warn');
+      if(!headerOk){ summary.hidden = false; return; }
+
+      const name = readCString(workBuf, NAME_OFF) || '(empty)';
+      const money = dv.getInt32(MONEY_OFF, true);
+      usedSlots = calcUsedSlots(workBuf);
+      setText('#profile', name);
+      setText('#moneyDisplay', String(money));
+      setText('#slots', String(usedSlots));
+      summary.hidden = false;
+
+      if(backupToggle.checked){ dlBakBtn.disabled = false; }
+
+      carsDiv.innerHTML = '';
+      for(let i=0;i<NUM_SLOTS;i++){
+        const inUse = i < usedSlots;
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `
+          <div><strong>Car ${i+1}</strong> <span class="muted">${inUse? 'IN USE' : 'empty'}</span></div>
+          <label class="muted" for="car_${i}">Change performance</label>
+          <select id="car_${i}" ${inUse? '' : 'disabled'}>
+            <option value="2">No effect</option>
+            <option value="0">Nill out</option>
+            <option value="1">Max out</option>
+          </select>
+        `;
+        carsDiv.appendChild(card);
+      }
+
+      nameField.value = '';
+      moneyField.value = '-1';
+
+      editor.hidden = false;
+      applyBtn.disabled = false;
+      dlBtn.disabled = false;
+    });
+
+    applyBtn.addEventListener('click', ()=>{
+      if(!workBuf) return;
+      const newName = nameField.value.trim();
+      if(newName.length > 0){
+        writeCString(workBuf, NAME_OFF, newName, 32);
+        setText('#profile', newName);
+      }
+      const val = parseInt(moneyField.value.trim(), 10);
+      if(!Number.isNaN(val) && val !== -1 && val > 0){
+        dv.setInt32(MONEY_OFF, val, true);
+        setText('#moneyDisplay', String(val));
+      }
+      for(let i=0;i<usedSlots;i++){
+        const sel = document.getElementById(`car_${i}`);
+        if(!sel) continue;
+        const v = parseInt(sel.value,10);
+        if(v===0 || v===1){ setPerfForCar(workBuf, i, v); }
+      }
+
+      const blob = new Blob([workBuf], {type: 'application/octet-stream'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileHandle.name;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      applyBtn.textContent = 'Applied ✓';
+      setTimeout(()=> applyBtn.textContent = 'Apply Changes', 1000);
+    });
+
+    dlBakBtn.addEventListener('click', ()=>{
+      if(!originalBuf || !fileHandle) return;
+      const blob = new Blob([originalBuf], {type: 'application/octet-stream'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileHandle.name + '.bak';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    reloadBtn.addEventListener('click', ()=>{
+      if(fileHandle){
+        resetUI();
+        fileInput.value = '';
+        alert('To reset, select the file again.');
+      }
+    });
+  </script>
+</body>
+</html>
