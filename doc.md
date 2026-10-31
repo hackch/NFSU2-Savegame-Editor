@@ -70,19 +70,21 @@ This file records what we know about the `SPEED2.EXE` career save (`20CM` magic,
 - The unlock ranges are in [src/data/unlock-table.ts](src/data/unlock-table.ts).
 - Setting a byte to `FF` marks it unlocked. Each byte's mapping to a specific part is **unverified**.
 
-## Locking and garage count
+## Locking
 
-- A slot is locked when its index is at or past the unlocked count: `isSlotLocked` is `slot >= min(max(garageCount, 1), 5)`. Slot 1 is always unlocked.
-- Checked against real saves: `treav1r - bak` has garage count 1 and only slot 1 is unlocked, as shown in game. The used header (`+0x27C`) and link block (`+0x294`) do not decide the lock.
+- A slot is locked when its own lock flag is non-zero: `isSlotLocked` reads the byte at `slot base + 0x428`. `1` is locked, `0` is unlocked.
+- Confirmed in game: with the flag cleared on records 1–4 of `treav1r`, all 5 slots show unlocked and cars work. Setting only the garage count (`0xA175`) did not change the lock.
+- The garage count is written by `setSlotCar` and `unlockAllSlots` but is not read by the lock check. Its effect in game is unverified.
+- The byte at `+0x429` appears to be `hasCarBought` (unverified). The editor does not write it yet.
 - A slot can hold a car and still be locked. The UI shows it as "Locked", not "In use".
-- `setSlotCar` raises the garage count to `min(slot + 1, 6)` and never lowers it, which unlocks the slot it writes.
+- `setSlotCar` clears the lock flag of the slot it writes. `unlockAllSlots` clears all lock flags.
 
 ## Editor behaviour
 
 | Operation | What it writes |
 | --- | --- |
 | Replace car | Donor blocks 1–3 in the slot. Performance flags are zeroed. The used header and link block are copied from another slot if the target is empty. Tuning is kept otherwise |
-| Unlock all slots | Garage count set to 6. Empty link blocks are filled from a linked slot |
+| Unlock all slots | Lock flags cleared on all slots. Garage count set to 6. Empty link blocks are filled from a linked slot |
 | Swap slots | Whole slot blocks are swapped (**experimental**, untested in game) |
 | Set money / name | Only the target field. Input values are never mutated |
 

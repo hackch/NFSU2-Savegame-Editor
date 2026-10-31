@@ -1,7 +1,7 @@
 import type { Donor } from './cars.js';
 import {
   dataView, bytesToHex, slotBase, SLOT_BASE, SLOT_COUNT, SLOT_STRIDE, SLOT_USED_OFF, SLOT_HEADER_LEN, CAR_KEY_REL,
-  SLOT_LINK_OFF, SLOT_LINK_LEN, GARAGE_CAR_COUNT, GARAGE_CAR_MAX, PERF_OFF,
+  SLOT_LINK_OFF, SLOT_LINK_LEN, SLOT_LOCK_REL, GARAGE_CAR_COUNT, GARAGE_CAR_MAX, PERF_OFF,
 } from './layout.js';
 import { PERF_COUNT } from './perf.js';
 
@@ -38,23 +38,13 @@ export function isSlotLinked(data: Uint8Array, slot: number): boolean {
 }
 
 /**
- * Number of car slots the garage count unlocks, counting from slot 1.
- * A stored count of 0 is treated as 1, and any count of 5 or more unlocks all slots.
- * @param data Save bytes.
- * @returns A value from 1 to {@link SLOT_COUNT}.
- */
-export function unlockedSlotCount(data: Uint8Array): number {
-  return Math.min(Math.max(data[GARAGE_CAR_COUNT], 1), SLOT_COUNT);
-}
-
-/**
- * Whether the garage count locks a slot. Locked slots can hold a car but cannot be used.
+ * Whether a slot is locked, from its own lock flag. Locked slots can hold a car but cannot be used.
  * @param data Save bytes.
  * @param slot Slot index.
- * @returns True when the slot is at or past the unlocked count.
+ * @returns True when the slot's lock flag is non-zero.
  */
 export function isSlotLocked(data: Uint8Array, slot: number): boolean {
-  return slot >= unlockedSlotCount(data);
+  return data[slotBase(slot) + SLOT_LOCK_REL] !== 0;
 }
 
 /**
@@ -75,7 +65,7 @@ function findOtherSlot(data: Uint8Array, slot: number, predicate: (d: Uint8Array
  * Writes a donor car into a slot.
  * Donor blocks are written in order, and the slot's part flags are reset to stock.
  * Name and money are kept. An empty slot also gets the used header and link block copied from another slot.
- * The garage count (0xA175) is raised so the game does not treat this slot as locked.
+ * The slot's lock flag is cleared, and the garage count (0xA175) is raised as before.
  * @param data Save bytes. Not mutated.
  * @param slot Target slot.
  * @param donor Car to write.
@@ -101,6 +91,7 @@ export function setSlotCar(data: Uint8Array, slot: number, donor: Donor): Uint8A
   }
   // The donor blocks stop before the part flags, so without this the old car's parts would stay installed.
   out.fill(0, base + PERF_OFF, base + PERF_OFF + PERF_COUNT);
+  out[base + SLOT_LOCK_REL] = 0;
   if (needsHeader) {
     const header = data.slice(slotBase(headerTemplate) + SLOT_USED_OFF, slotBase(headerTemplate) + SLOT_USED_OFF + SLOT_HEADER_LEN);
     out.set(header, base + SLOT_USED_OFF);
@@ -114,7 +105,7 @@ export function setSlotCar(data: Uint8Array, slot: number, donor: Donor): Uint8A
 }
 
 /**
- * Sandbox-style unlock: raises the garage count to its cap and fills empty link blocks from a linked slot.
+ * Sandbox-style unlock: clears every slot's lock flag, raises the garage count to its cap and fills empty link blocks from a linked slot.
  * Car blocks and headers are left alone, so empty slots stay empty.
  * @param data Save bytes. Not mutated.
  * @returns A new array.
@@ -122,6 +113,7 @@ export function setSlotCar(data: Uint8Array, slot: number, donor: Donor): Uint8A
 export function unlockAllSlots(data: Uint8Array): Uint8Array {
   const out = data.slice();
   out[GARAGE_CAR_COUNT] = GARAGE_CAR_MAX;
+  for (let i = 0; i < SLOT_COUNT; i++) out[slotBase(i) + SLOT_LOCK_REL] = 0;
   const template = findOtherSlot(data, -1, isSlotLinked);
   if (template < 0) return out;
   const link = data.slice(slotBase(template) + SLOT_LINK_OFF, slotBase(template) + SLOT_LINK_OFF + SLOT_LINK_LEN);

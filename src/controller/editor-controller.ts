@@ -154,7 +154,7 @@ export function EditorController($scope: EditorScope): void {
   };
 
   $scope.usedCount = function (): number {
-    return $scope.slots.filter((s) => s.used).length;
+    return $scope.slots.filter((s) => s.used && !s.locked).length;
   };
 
   $scope.applyProfile = function (): void {

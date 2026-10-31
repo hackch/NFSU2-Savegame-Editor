@@ -29,11 +29,13 @@ export const SLOT_USED_OFF = 0x27c;
 export const SLOT_HEADER_LEN = 24;
 /** Slot-relative model key (last 4 bytes of the `+0x2B0` block). */
 export const CAR_KEY_REL = 0x2bc;
-/** Slot-relative link block; all zero means it is not linked. Lock state comes from the garage count. */
+/** Slot-relative link block; all zero means it is not linked. */
 export const SLOT_LINK_OFF = 0x294;
 /** Length of the link block. */
 export const SLOT_LINK_LEN = 16;
-/** Garage car count byte. */
+/** Slot-relative lock flag; non-zero means the slot is locked. */
+export const SLOT_LOCK_REL = 0x428;
+/** Garage car count byte. Not the lock; the per-slot flag above decides it. */
 export const GARAGE_CAR_COUNT = 0xa175;
 /** Cap of the garage car count. */
 export const GARAGE_CAR_MAX = 6;
