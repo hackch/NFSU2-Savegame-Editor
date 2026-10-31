@@ -1,212 +1,125 @@
 <!doctype html>
-<html lang="en">
-
+<html lang="en" ng-app="nfsu2Editor">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>NFSU2 Save Editor (Offline)</title>
-  <style>
-    :root {
-      --bg: #0f1220;
-      --panel: #171a2b;
-      --muted: #98a2b3;
-      --text: #e5e7eb;
-      --accent: #60a5fa;
-    }
-
-    html,
-    body {
-      height: 100%
-    }
-
-    body {
-      margin: 0;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-    }
-
-    .wrap {
-      max-width: 900px;
-      margin: 0 auto;
-      padding: 24px;
-    }
-
-    h1 {
-      font-size: clamp(20px, 3vw, 28px);
-      margin: 0 0 8px
-    }
-
-    .sub {
-      color: var(--muted);
-      margin-bottom: 16px
-    }
-
-    .card {
-      background: var(--panel);
-      border: 1px solid #22263e;
-      border-radius: 16px;
-      padding: 16px;
-      margin: 12px 0;
-      box-shadow: 0 4px 24px rgba(0, 0, 0, .25)
-    }
-
-    .row {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap
-    }
-
-    label {
-      display: block;
-      font-weight: 600;
-      margin-bottom: 6px
-    }
-
-    input[type="file"],
-    input[type="number"],
-    input[type="text"],
-    select,
-    button {
-      background: #0e1224;
-      border: 1px solid #252b45;
-      color: var(--text);
-      border-radius: 10px;
-      padding: 10px 12px
-    }
-
-    input[type="number"],
-    input[type="text"],
-    select {
-      width: 100%
-    }
-
-    button {
-      cursor: pointer
-    }
-
-    button.primary {
-      background: linear-gradient(180deg, #2563eb, #1d4ed8);
-      border: 0
-    }
-
-    button:disabled {
-      opacity: .5;
-      cursor: not-allowed
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 14px
-    }
-
-    .muted {
-      color: var(--muted)
-    }
-
-    .pill {
-      display: inline-block;
-      padding: 4px 8px;
-      border-radius: 999px;
-      background: #0b1022;
-      border: 1px solid #2a3053;
-      font-size: 12px
-    }
-
-    .warn {
-      color: #fbbf24
-    }
-
-    .ok {
-      color: #34d399
-    }
-
-    details {
-      border: 1px dashed #2a3053;
-      border-radius: 12px;
-      padding: 10px
-    }
-
-    code {
-      background: #0b1022;
-      border: 1px solid #2a3053;
-      padding: 2px 6px;
-      border-radius: 6px
-    }
-
-    .footer {
-      margin-top: 18px;
-      font-size: 12px;
-      color: var(--muted)
-    }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NFSU2 Career Save Editor</title>
+  <link rel="stylesheet" href="./editor.css">
+  <link rel="stylesheet" href="./app.css">
 </head>
-
-<body>
-  <div class="wrap">
-    <h1>NFS Underground 2 – Save Editor (100% client‑side)</h1>
-    <div class="sub">Open a save file, tweak name, money and car performance, then download the modified file. No
-      uploads; everything stays in your browser.</div>
-
-    <div class="card">
-      <div class="grid">
-        <div>
-          <label for="file">Save file</label>
-          <input id="file" type="file" accept="*/*" />
-          <div class="muted" id="fileInfo">No file selected.</div>
-        </div>
-        <div>
-          <label>&nbsp;</label>
-          <label class="muted"><input id="backupToggle" type="checkbox" checked /> Create .bak backup on load</label>
-        </div>
-      </div>
+<body ng-controller="EditorController">
+  <header>
+    <div>
+      <p class="landing-eyebrow">NEED FOR SPEED UNDERGROUND 2</p>
+      <h1>Career Save Editor</h1>
+      <p>Edit money, driver name, car slots and performance parts. Checksums are recalculated on download.</p>
     </div>
+  </header>
 
-    <div class="card" id="summary" hidden>
-      <div class="grid">
-        <div>
-          <div class="muted">Profile Name</div>
-          <div id="profile" class="pill">—</div>
-        </div>
-        <div>
-          <div class="muted">Money</div>
-          <div id="moneyDisplay" class="pill">—</div>
-        </div>
-        <div>
-          <div class="muted">Car Slots Used</div>
-          <div id="slots" class="pill">—</div>
-        </div>
-        <div>
-          <div class="muted">Header Check</div>
-          <div id="headerStatus" class="pill">—</div>
-        </div>
+  <main class="editor-main">
+    <section class="profile-section">
+      <h3>Save file</h3>
+      <div class="editor-row">
+        <input type="file" id="file" accept="*/*" nfsu-file-change="loadFile">
+        <span class="muted" ng-if="fileName">{{ fileName }} ({{ fileSize }} bytes)</span>
       </div>
-    </div>
+      <p class="message" ng-class="status.type" ng-if="status.text" role="status">{{ status.text }}</p>
+    </section>
 
-    <div class="card" id="editor" hidden>
-      <div class="grid">
-        <div>
-          <label for="name">New Profile Name (leave empty = no change)</label>
-          <input id="name" type="text" maxlength="32" />
+    <section class="profile-section" ng-if="loaded">
+      <h3>Profile</h3>
+      <form class="bike-dialog-form" ng-submit="applyProfile()">
+        <label>
+          Driver name
+          <input type="text" id="nameInput" ng-model="form.name" maxlength="31">
+        </label>
+        <label>
+          Money
+          <input type="number" id="moneyInput" ng-model="form.money" min="0" max="2147483647" step="1">
+        </label>
+        <div class="bike-dialog-actions">
+          <span class="muted">Checksums: {{ checksumText() }}</span>
+          <button type="submit" class="profile-action-btn">Apply profile</button>
         </div>
-        <div>
-          <label for="money">New Money (‑1 = no change)</label>
-          <input id="money" type="number" step="1" />
-        </div>
-      </div>
-      <div style="height:12px"></div>
-      <div class="grid" id="cars"></div>
-      <div style="height:12px"></div>
-      <div class="row">
-        <button id="apply" class="primary" disabled>Apply Changes</button>
-        <button id="download" disabled>Download Modified Save</button>
-        <button id="downloadBak" disabled>Download Backup (.bak)</button>
-        <button id="reload">Reset (re‑read file)</button>
-      </div>
-    </div>
+      </form>
+    </section>
 
-    <script src="src/nfsu2saveeditor.js"></script>
+    <section class="profile-section" ng-if="loaded">
+      <h3>Car slots</h3>
+      <p class="muted">{{ usedCount() }} of {{ slots.length }} slots in use.</p>
+      <div class="bike-list">
+        <article class="bike-card" ng-repeat="slot in slots track by slot.index">
+          <div class="bike-card-heading">
+            <strong>Car slot {{ slot.index + 1 }}</strong>
+            <span>{{ slot.used ? 'In use' : 'Empty' }} · {{ slot.perfCount }} / {{ perfTotal }} parts</span>
+          </div>
+          <p class="muted">
+            {{ slot.car ? slot.car.name : (slot.key === '00000000' ? 'No car' : 'Unknown car (key ' + slot.key + ')') }}
+          </p>
+          <div class="bike-actions">
+            <button type="button" class="profile-action-btn" ng-click="openTuning(slot.index)">Tuning…</button>
+            <button type="button" class="profile-action-btn" ng-click="installAll(slot.index, true)">Install all</button>
+            <button type="button" class="profile-action-btn" ng-click="installAll(slot.index, false)">Stock</button>
+          </div>
+          <div class="bike-actions">
+            <select ng-model="replaceTarget[slot.index]" ng-options="d.id as d.name for d in donors" ng-disabled="!donors.length">
+              <option value="">{{ slot.used ? 'Replace car with…' : 'Add car…' }}</option>
+            </select>
+            <button type="button" class="profile-action-btn" ng-disabled="replaceTarget[slot.index] === undefined || replaceTarget[slot.index] === ''"
+                    ng-click="replaceCar(slot.index)">{{ slot.used ? 'Replace car' : 'Add car' }}</button>
+          </div>
+          <div class="bike-actions">
+            <select ng-model="swapTarget[slot.index]" ng-options="s.index as ('Slot ' + (s.index + 1)) for s in otherSlots(slot.index)">
+              <option value="">Swap with…</option>
+            </select>
+            <button type="button" class="profile-action-btn" ng-disabled="swapTarget[slot.index] === undefined || swapTarget[slot.index] === ''"
+                    ng-click="swapSlots(slot.index)">Swap (experimental)</button>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="profile-section" ng-if="loaded">
+      <button type="button" class="profile-action-btn" ng-click="download()">Download edited save</button>
+    </section>
+  </main>
+
+  <div class="bike-dialog-backdrop" ng-if="tuning.open" ng-click="closeTuning()">
+    <section class="bike-dialog tuning-dialog" role="dialog" aria-modal="true" aria-labelledby="tuningTitle" ng-click="$event.stopPropagation()">
+      <div class="bike-dialog-heading">
+        <div>
+          <p class="landing-eyebrow">TUNING</p>
+          <h3 id="tuningTitle">Car slot {{ tuning.slot + 1 }}</h3>
+        </div>
+        <button type="button" class="bike-dialog-close" aria-label="Close dialog" ng-click="closeTuning()">×</button>
+      </div>
+      <p class="muted">Parts marked "unverified" have names from the exe table but are not yet confirmed in-game.</p>
+      <div class="profile-tabs" role="tablist">
+        <button type="button" role="tab" ng-repeat="cat in tuning.categories track by cat.code"
+                ng-class="{ active: tuning.activeCode === cat.code }"
+                ng-attr-aria-selected="{{ tuning.activeCode === cat.code ? 'true' : 'false' }}"
+                ng-click="selectTab(cat.code)">{{ cat.label }}</button>
+      </div>
+      <div class="profile-section" role="tabpanel" ng-repeat="cat in tuning.categories track by cat.code" ng-show="tuning.activeCode === cat.code">
+        <div class="bike-actions">
+          <strong>{{ cat.label }}</strong>
+          <button type="button" class="profile-action-btn" ng-click="setCategory(cat, true)">All</button>
+          <button type="button" class="profile-action-btn" ng-click="setCategory(cat, false)">None</button>
+        </div>
+        <label class="overlay-controls" ng-repeat="part in cat.parts track by part.index">
+          <input type="checkbox" ng-model="part.on" ng-change="togglePart(part)">
+          {{ part.label }}
+          <span class="muted">{{ part.verified ? '' : '(unverified)' }}</span>
+        </label>
+      </div>
+      <div class="bike-dialog-actions">
+        <span></span>
+        <button type="button" class="profile-action-btn bike-dialog-cancel" ng-click="closeTuning()">Done</button>
+      </div>
+    </section>
+  </div>
+
+  <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.8.2/angular.min.js"></script>
+  <script type="module" src="./app.js"></script>
 </body>
-
 </html>
