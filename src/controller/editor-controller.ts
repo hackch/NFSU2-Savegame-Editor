@@ -2,7 +2,7 @@ import { PERF_CATEGORIES, PERF_PARTS, type PerfPart } from '../data/perf-parts.j
 import { parseCarDatabase, buildCarIndex, identifyCar, type Donor } from '../model/cars.js';
 import { checkSave, verifyChecksums, recalculateChecksums, getMoney, setMoney, getName, setName } from '../model/save-file.js';
 import { SLOT_COUNT } from '../model/layout.js';
-import { getCarKey, isSlotUsed, setSlotCar, swapSlots as swapCarSlots, unlockAllSlots as unlockAllCarSlots } from '../model/slots.js';
+import { getCarKey, isSlotLocked, isSlotUsed, setSlotCar, swapSlots as swapCarSlots, unlockAllSlots as unlockAllCarSlots } from '../model/slots.js';
 import { getPerfFlag, setPerfFlag, setPerfFlags, PERF_COUNT } from '../model/perf.js';
 import { countUnlocked, setUnlocks, UNLOCK_COUNT } from '../model/unlocks.js';
 import type { CategoryView, EditorScope, PartView, SlotView, Status, TuningTab } from './editor-scope.js';
@@ -84,6 +84,7 @@ export function EditorController($scope: EditorScope): void {
       return {
         index,
         used: isSlotUsed(bytes, index),
+        locked: isSlotLocked(bytes, index),
         key,
         car: identifyCar(donorIndex, key),
         perfCount: ALL_INDICES.filter((i) => getPerfFlag(bytes, index, i)).length,

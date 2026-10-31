@@ -10,7 +10,7 @@ import {
 } from '../model/save-file.js';
 import { getPerfFlag, setPerfFlag, setPerfFlags, PERF_COUNT } from '../model/perf.js';
 import {
-  getCarKey, isSlotUsed, isSlotLinked, setSlotCar, swapSlots, unlockAllSlots,
+  getCarKey, isSlotUsed, isSlotLinked, isSlotLocked, unlockedSlotCount, setSlotCar, swapSlots, unlockAllSlots,
 } from '../model/slots.js';
 import { countUnlocked, countUnlockedCategory, setUnlocks, setUnlockCategory, UNLOCK_COUNT } from '../model/unlocks.js';
 import {
@@ -282,4 +282,19 @@ test('fixture: unlockAllSlots raises the count to 6 and links every slot without
 test('setSlotCar refuses when there is no used slot to copy the header from', () => {
   const data = new Uint8Array(0xd300);
   assert.throws(() => setSlotCar(data, 0, donors[0]), RangeError);
+});
+
+test('lock state follows the garage count, not the used header', () => {
+  const data = new Uint8Array(0xd300);
+  for (const [count, unlocked] of [[0, 1], [1, 1], [4, 4], [5, 5], [6, 5], [200, 5]] as const) {
+    data[GARAGE_CAR_COUNT] = count;
+    assert.equal(unlockedSlotCount(data), unlocked, `count ${count}`);
+    for (let s = 0; s < 5; s++) assert.equal(isSlotLocked(data, s), s >= unlocked, `count ${count} slot ${s}`);
+  }
+});
+
+test('garage count 1 (treav1r-backup layout) leaves only slot 1 unlocked', () => {
+  const data = new Uint8Array(0xd300);
+  data[GARAGE_CAR_COUNT] = 1;
+  assert.deepEqual([0, 1, 2, 3, 4].map((s) => isSlotLocked(data, s)), [false, true, true, true, true]);
 });

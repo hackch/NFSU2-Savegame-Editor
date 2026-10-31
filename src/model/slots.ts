@@ -27,7 +27,7 @@ export function getCarKey(data: Uint8Array, slot: number): string {
 }
 
 /**
- * Whether the game's link block is filled. The game only shows a slot as unlocked when it is.
+ * Whether the slot's link block is filled.
  * @param data Save bytes.
  * @param slot Slot index.
  * @returns True when any byte of the link block is non-zero.
@@ -35,6 +35,26 @@ export function getCarKey(data: Uint8Array, slot: number): string {
 export function isSlotLinked(data: Uint8Array, slot: number): boolean {
   const start = slotBase(slot) + SLOT_LINK_OFF;
   return data.subarray(start, start + SLOT_LINK_LEN).some((b) => b !== 0);
+}
+
+/**
+ * Number of car slots the garage count unlocks, counting from slot 1.
+ * A stored count of 0 is treated as 1, and any count of 5 or more unlocks all slots.
+ * @param data Save bytes.
+ * @returns A value from 1 to {@link SLOT_COUNT}.
+ */
+export function unlockedSlotCount(data: Uint8Array): number {
+  return Math.min(Math.max(data[GARAGE_CAR_COUNT], 1), SLOT_COUNT);
+}
+
+/**
+ * Whether the garage count locks a slot. Locked slots can hold a car but cannot be used.
+ * @param data Save bytes.
+ * @param slot Slot index.
+ * @returns True when the slot is at or past the unlocked count.
+ */
+export function isSlotLocked(data: Uint8Array, slot: number): boolean {
+  return slot >= unlockedSlotCount(data);
 }
 
 /**

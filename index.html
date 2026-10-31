@@ -54,7 +54,7 @@
         <article class="bike-card" ng-repeat="slot in slots track by slot.index">
           <div class="bike-card-heading">
             <strong>Car slot {{ slot.index + 1 }}</strong>
-            <span>{{ slot.used ? 'In use' : 'Empty' }} · {{ slot.perfCount }} / {{ perfTotal }} parts · {{ slot.unlocked }} / {{ unlockTotal }} unlocked</span>
+            <span>{{ slot.locked ? 'Locked' : (slot.used ? 'In use' : 'Empty') }} · {{ slot.perfCount }} / {{ perfTotal }} parts · {{ slot.unlocked }} / {{ unlockTotal }} unlocked</span>
           </div>
           <p class="muted">
             {{ slot.car ? slot.car.name : (slot.key === '00000000' ? 'No car' : 'Unknown car (key ' + slot.key + ')') }}

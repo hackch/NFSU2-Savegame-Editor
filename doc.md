@@ -42,7 +42,7 @@ This file records what we know about the `SPEED2.EXE` career save (`20CM` magic,
 | `+0x0E0` | `0x1D0` | Donor block 2 |
 | `+0x2B0` | `0x14` | Donor block 3, end-of-car data |
 | `+0x27C` | 24 | Used header. A non-zero uint16 means the slot is used |
-| `+0x294` | 16 | Link block. All zero means the slot is locked |
+| `+0x294` | 16 | Link block. All zero means not linked (does not decide the lock) |
 | `+0x2BC` | 4 | Model key (the last 4 bytes of donor block 3) |
 | `+0x310` | 68 | Performance flags, one byte each |
 | `+0x462` | 420 | Unlock table, bytes `00` or `FF` |
@@ -72,10 +72,10 @@ This file records what we know about the `SPEED2.EXE` career save (`20CM` magic,
 
 ## Locking and garage count
 
-- A slot is locked when its link block is all zero.
-- The rule `garageCount > slotIndex` comes from a third-party bundle and is **unverified** in game.
-- `setSlotCar` raises the garage count to `min(slot + 1, 6)` and never lowers it.
-- Whether the garage count plus the link block fully unlocks a slot in game is **unverified**.
+- A slot is locked when its index is at or past the unlocked count: `isSlotLocked` is `slot >= min(max(garageCount, 1), 5)`. Slot 1 is always unlocked.
+- Checked against real saves: `treav1r - bak` has garage count 1 and only slot 1 is unlocked, as shown in game. The used header (`+0x27C`) and link block (`+0x294`) do not decide the lock.
+- A slot can hold a car and still be locked. The UI shows it as "Locked", not "In use".
+- `setSlotCar` raises the garage count to `min(slot + 1, 6)` and never lowers it, which unlocks the slot it writes.
 
 ## Editor behaviour
 

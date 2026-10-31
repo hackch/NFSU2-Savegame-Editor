@@ -11,6 +11,7 @@ export interface Status {
 export interface SlotView {
   index: number;
   used: boolean;
+  locked: boolean;
   key: string;
   car: Donor | null;
   perfCount: number;
