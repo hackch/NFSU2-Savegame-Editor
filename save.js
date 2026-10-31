@@ -1,6 +1,6 @@
 import { nfsu2Crc } from './crc32.js';
 import { PERF_PARTS } from './perf-parts.js';
-import { UNLOCK_OFFSETS } from './unlock-table.js';
+import { UNLOCK_CATEGORY_OFFSETS, UNLOCK_OFFSETS } from './unlock-table.js';
 
 export const MAGIC = [0x32, 0x30, 0x43, 0x4d];
 export const HEADER_SIZE = 0x1c;
@@ -223,6 +223,27 @@ export function setUnlocks(data, slot, on) {
   const out = data.slice();
   const value = on ? 0xff : 0x00;
   for (const rel of UNLOCK_OFFSETS) {
+    out[base + rel] = value;
+  }
+  return out;
+}
+
+// Number of a category's unlock bytes set to 0xFF in a slot.
+export function countUnlockedCategory(data, slot, category) {
+  const base = slotBase(slot);
+  let count = 0;
+  for (const rel of UNLOCK_CATEGORY_OFFSETS[category]) {
+    if (data[base + rel] === 0xff) count++;
+  }
+  return count;
+}
+
+// Sets one category's unlock bytes to 0xFF (on) or 00 (off). Other bytes are untouched.
+export function setUnlockCategory(data, slot, category, on) {
+  const base = slotBase(slot);
+  const out = data.slice();
+  const value = on ? 0xff : 0x00;
+  for (const rel of UNLOCK_CATEGORY_OFFSETS[category]) {
     out[base + rel] = value;
   }
   return out;

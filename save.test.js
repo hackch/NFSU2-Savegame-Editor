@@ -7,10 +7,11 @@ import { PERF_PARTS, PERF_CATEGORIES } from './perf-parts.js';
 import {
   checkSave, verifyChecksums, recalculateChecksums, getMoney, setMoney,
   getName, setName, validateName, isSlotUsed, getPerfFlag, setPerfFlag,
-  setPerfFlags, swapSlots, getCarKey, setSlotCar, isSlotLinked, GARAGE_CAR_COUNT, SLOT_LINK_OFF, SLOT_LINK_LEN, countUnlocked, setUnlocks, UNLOCK_COUNT,
+  setPerfFlags, swapSlots, getCarKey, setSlotCar, isSlotLinked, GARAGE_CAR_COUNT, SLOT_LINK_OFF, SLOT_LINK_LEN, unlockAllSlots, countUnlocked, setUnlocks, UNLOCK_COUNT,
+  countUnlockedCategory, setUnlockCategory,
   SLOT_BASE, SLOT_STRIDE, PERF_OFF, PERF_COUNT, MONEY_OFF,
 } from './save.js';
-import { UNLOCK_OFFSETS } from './unlock-table.js';
+import { UNLOCK_OFFSETS, UNLOCK_CATEGORY_OFFSETS } from './unlock-table.js';
 import { parseCarDatabase, buildCarIndex, identifyCar } from './cars.js';
 
 const FIXTURE = fileURLToPath(new URL('./testfile/treav0r', import.meta.url));
@@ -127,6 +128,33 @@ test('setUnlocks on and off only changes unlock-table bytes of its own slot', ()
 
   const off = setUnlocks(on, 2, false);
   assert.equal(countUnlocked(off, 2), 0);
+});
+
+test('unlock categories partition the 420-byte table', () => {
+  const names = Object.keys(UNLOCK_CATEGORY_OFFSETS);
+  assert.deepEqual(names.sort(), ['bodyParts', 'graphics', 'performance', 'specialities']);
+  const all = names.flatMap((n) => UNLOCK_CATEGORY_OFFSETS[n]);
+  assert.equal(new Set(all).size, UNLOCK_COUNT);
+  assert.deepEqual([...all].sort((a, b) => a - b), UNLOCK_OFFSETS);
+  assert.equal(UNLOCK_CATEGORY_OFFSETS.bodyParts.length, 220);
+  assert.equal(UNLOCK_CATEGORY_OFFSETS.specialities.length, 80);
+  assert.equal(UNLOCK_CATEGORY_OFFSETS.graphics.length, 112);
+  assert.equal(UNLOCK_CATEGORY_OFFSETS.performance.length, 8);
+});
+
+test('setUnlockCategory only changes that category in its own slot', () => {
+  const data = new Uint8Array(SLOT_BASE + 5 * SLOT_STRIDE + 16).fill(0x11);
+  const base = SLOT_BASE + 1 * SLOT_STRIDE;
+  const on = setUnlockCategory(data, 1, 'performance', true);
+  const changed = [];
+  for (let i = 0; i < data.length; i++) if (on[i] !== data[i]) changed.push(i);
+  assert.deepEqual(changed, UNLOCK_CATEGORY_OFFSETS.performance.map((rel) => base + rel));
+  assert.equal(countUnlockedCategory(on, 1, 'performance'), 8);
+  assert.equal(countUnlockedCategory(on, 1, 'graphics'), 0);
+  assert.equal(countUnlocked(on, 1), 8);
+
+  const off = setUnlockCategory(on, 1, 'performance', false);
+  assert.equal(countUnlockedCategory(off, 1, 'performance'), 0);
 });
 
 test('fixture: checksums verify and recalculation is a no-op', { skip: !hasFixture && 'testfile/treav0r missing' }, () => {
