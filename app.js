@@ -2,7 +2,7 @@ import { PERF_PARTS, PERF_CATEGORIES } from './perf-parts.js';
 import {
   checkSave, verifyChecksums, recalculateChecksums, getMoney, setMoney,
   getName, setName, isSlotUsed, getPerfFlag, setPerfFlag, setPerfFlags,
-  swapSlots as swapCarSlots, getCarKey, setSlotCar, countUnlocked, setUnlocks,
+  swapSlots as swapCarSlots, getCarKey, setSlotCar, countUnlocked, setUnlocks, unlockAllSlots,
   SLOT_COUNT, PERF_COUNT, UNLOCK_COUNT,
 } from './save.js';
 import { parseCarDatabase, buildCarIndex, identifyCar } from './cars.js';
@@ -212,6 +212,14 @@ app.controller('EditorController', ['$scope', function ($scope) {
     setStatus('success', `Slot ${slot + 1}: ${on ? 'unlock table set to all unlocked' : 'unlock table cleared'}.`);
   };
 
+
+  $scope.unlockAllSlots = function () {
+    if (!confirm('Set the garage count to 6 and link all five car slots? Car contents are not changed. Its effect in-game is not verified.')) {
+      return;
+    }
+    applyResult(unlockAllSlots(data));
+    setStatus('success', 'Garage count set to 6 and all car slots linked.');
+  };
 
   $scope.closeTuning = function () {
     $scope.tuning.open = false;

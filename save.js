@@ -14,6 +14,10 @@ export const SLOT_COUNT = 5;
 export const SLOT_USED_OFF = 0x27c;
 export const SLOT_HEADER_LEN = 24;
 export const CAR_KEY_REL = 0x2bc;
+export const SLOT_LINK_OFF = 0x294;
+export const SLOT_LINK_LEN = 16;
+export const GARAGE_CAR_COUNT = 0xa175;
+export const GARAGE_CAR_MAX = 6;
 export const PERF_OFF = 0x310;
 export const PERF_COUNT = PERF_PARTS.length;
 export const UNLOCK_COUNT = UNLOCK_OFFSETS.length;
@@ -124,18 +128,29 @@ export function getCarKey(data, slot) {
   return Array.from(data.subarray(start, start + 4), (b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
 }
 
+// The game only shows a slot as unlocked when its link block (+0x294, 16 bytes) is non-zero.
+export function isSlotLinked(data, slot) {
+  const start = slotBase(slot) + SLOT_LINK_OFF;
+  return data.subarray(start, start + SLOT_LINK_LEN).some((b) => b !== 0);
+}
+
+function findOtherSlot(data, slot, predicate) {
+  for (let i = 0; i < SLOT_COUNT; i++) {
+    if (i !== slot && predicate(data, i)) return i;
+  }
+  return -1;
+}
+
 // Writes a donor's slot blocks (in the order given) and resets the slot's part flags to stock.
-// Name and money are kept. An empty slot also gets the used header copied from the first slot in use (unverified in-game).
+// Name and money are kept. An empty slot also gets the used header and link block copied from another slot.
+// The garage count (0xA175) is raised so the game does not treat this slot as locked.
 export function setSlotCar(data, slot, donor) {
   const base = slotBase(slot);
   const needsHeader = !isSlotUsed(data, slot);
-  let template = -1;
-  if (needsHeader) {
-    for (let i = 0; i < SLOT_COUNT && template < 0; i++) {
-      if (i !== slot && isSlotUsed(data, i)) template = i;
-    }
-    if (template < 0) throw new RangeError('No car is in use, so there is no slot header to copy.');
-  }
+  const needsLink = !isSlotLinked(data, slot);
+  const headerTemplate = needsHeader ? findOtherSlot(data, slot, isSlotUsed) : -1;
+  if (needsHeader && headerTemplate < 0) throw new RangeError('No car is in use, so there is no slot header to copy.');
+  const linkTemplate = needsLink ? findOtherSlot(data, slot, isSlotLinked) : -1;
   for (const block of donor.blocks) {
     const rel = block.off - SLOT_BASE;
     if (rel < 0 || rel + block.bytes.length > SLOT_STRIDE) {
@@ -149,8 +164,27 @@ export function setSlotCar(data, slot, donor) {
   // The donor blocks stop before the part flags, so without this the old car's parts would stay installed.
   out.fill(0, base + PERF_OFF, base + PERF_OFF + PERF_COUNT);
   if (needsHeader) {
-    const header = data.slice(slotBase(template) + SLOT_USED_OFF, slotBase(template) + SLOT_USED_OFF + SLOT_HEADER_LEN);
+    const header = data.slice(slotBase(headerTemplate) + SLOT_USED_OFF, slotBase(headerTemplate) + SLOT_USED_OFF + SLOT_HEADER_LEN);
     out.set(header, base + SLOT_USED_OFF);
+  }
+  if (linkTemplate >= 0) {
+    const link = data.slice(slotBase(linkTemplate) + SLOT_LINK_OFF, slotBase(linkTemplate) + SLOT_LINK_OFF + SLOT_LINK_LEN);
+    out.set(link, base + SLOT_LINK_OFF);
+  }
+  out[GARAGE_CAR_COUNT] = Math.max(out[GARAGE_CAR_COUNT], Math.min(slot + 1, GARAGE_CAR_MAX));
+  return out;
+}
+
+// Sandbox-style: raises the garage count to its cap and fills empty link blocks from a linked slot.
+// Car blocks and headers are left alone, so empty slots stay empty.
+export function unlockAllSlots(data) {
+  const out = data.slice();
+  out[GARAGE_CAR_COUNT] = GARAGE_CAR_MAX;
+  const template = findOtherSlot(data, -1, isSlotLinked);
+  if (template < 0) return out;
+  const link = data.slice(slotBase(template) + SLOT_LINK_OFF, slotBase(template) + SLOT_LINK_OFF + SLOT_LINK_LEN);
+  for (let i = 0; i < SLOT_COUNT; i++) {
+    if (!isSlotLinked(data, i)) out.set(link, slotBase(i) + SLOT_LINK_OFF);
   }
   return out;
 }

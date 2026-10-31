@@ -47,6 +47,9 @@
     <section class="profile-section" ng-if="loaded">
       <h3>Car slots</h3>
       <p class="muted">{{ usedCount() }} of {{ slots.length }} slots in use.</p>
+      <div class="bike-actions">
+        <button type="button" class="profile-action-btn" ng-click="unlockAllSlots()">Unlock all slots (sandbox)</button>
+      </div>
       <div class="bike-list">
         <article class="bike-card" ng-repeat="slot in slots track by slot.index">
           <div class="bike-card-heading">

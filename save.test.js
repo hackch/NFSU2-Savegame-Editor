@@ -7,7 +7,7 @@ import { PERF_PARTS, PERF_CATEGORIES } from './perf-parts.js';
 import {
   checkSave, verifyChecksums, recalculateChecksums, getMoney, setMoney,
   getName, setName, validateName, isSlotUsed, getPerfFlag, setPerfFlag,
-  setPerfFlags, swapSlots, getCarKey, setSlotCar, countUnlocked, setUnlocks, UNLOCK_COUNT,
+  setPerfFlags, swapSlots, getCarKey, setSlotCar, isSlotLinked, GARAGE_CAR_COUNT, SLOT_LINK_OFF, SLOT_LINK_LEN, countUnlocked, setUnlocks, UNLOCK_COUNT,
   SLOT_BASE, SLOT_STRIDE, PERF_OFF, PERF_COUNT, MONEY_OFF,
 } from './save.js';
 import { UNLOCK_OFFSETS } from './unlock-table.js';
@@ -203,14 +203,36 @@ test('fixture: replacing a car only changes its slot and the checksum bytes', { 
   }
 });
 
-test('fixture: empty slot 5 becomes a used car with the copied header', { skip: !hasFixture && 'testfile/treav0r missing' }, () => {
+test('fixture: empty slot 5 becomes a used and linked car, and the garage count admits it', { skip: !hasFixture && 'testfile/treav0r missing' }, () => {
   const data = load();
+  assert.equal(data[GARAGE_CAR_COUNT], 4);
+  assert.equal(isSlotLinked(data, 4), false);
   const out = setSlotCar(data, 4, donorNamed('Mazda Miata MX5'));
   assert.equal(isSlotUsed(out, 4), true);
+  assert.equal(isSlotLinked(out, 4), true);
   assert.equal(identifyCar(carIndex, getCarKey(out, 4)).name, 'Mazda Miata MX5');
+  assert.equal(out[GARAGE_CAR_COUNT], 5);
   const headerStart = SLOT_BASE + 4 * SLOT_STRIDE + 0x27c;
   assert.deepEqual(out.slice(headerStart, headerStart + 24), data.slice(SLOT_BASE + 0x27c, SLOT_BASE + 0x27c + 24));
+  const linkStart = SLOT_BASE + 4 * SLOT_STRIDE + SLOT_LINK_OFF;
+  assert.deepEqual(out.slice(linkStart, linkStart + SLOT_LINK_LEN), data.slice(SLOT_BASE + SLOT_LINK_OFF, SLOT_BASE + SLOT_LINK_OFF + SLOT_LINK_LEN));
 });
+
+test('setSlotCar never lowers the garage count', { skip: !hasFixture && 'testfile/treav0r missing' }, () => {
+  const data = load();
+  const out = setSlotCar(data, 0, donorNamed('Toyota Supra'));
+  assert.equal(out[GARAGE_CAR_COUNT], data[GARAGE_CAR_COUNT]);
+});
+
+test('fixture: unlockAllSlots raises the count to 6 and links every slot without adding cars', { skip: !hasFixture && 'testfile/treav0r missing' }, () => {
+  const data = load();
+  const out = unlockAllSlots(data);
+  assert.equal(out[GARAGE_CAR_COUNT], 6);
+  for (let i = 0; i < 5; i++) assert.equal(isSlotLinked(out, i), true);
+  assert.equal(isSlotUsed(out, 4), false);
+  assert.equal(getCarKey(out, 4), '00000000');
+});
+
 
 test('setSlotCar refuses when there is no used slot to copy the header from', () => {
   const data = new Uint8Array(0xd300);
