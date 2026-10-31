@@ -19,6 +19,7 @@ Host the repo root on GitHub Pages, or serve it locally (for example `python -m 
 - Cars that share a model key (base, sponsor and intro versions) show the first name listed.
 - **Swap (experimental)** copies a whole car slot block. It has not been tested in-game.
 - **Install all** turns on all 68 performance-part flags. Only the muffler (15) and cold air intake (16) flags are verified in-game.
+- **Unlock all** sets the 420 bytes that NFSU2-ProfileCreator writes as `0xFF` in each car slot (ranges in `unlock-table.js`, offsets `+0x462` to `+0x7E1`). It only writes those bytes. The byte-to-part mapping and the in-game effect are not verified yet.
 
 ## Tests
 

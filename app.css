@@ -1,10 +1,117 @@
-.tuning-dialog { width: min(100%, 640px); }
+.tuning-dialog { width: min(100%, 760px); }
 
-.tuning-dialog .profile-tabs { flex-wrap: wrap; }
+/* Top tabs for the four tuning categories; they wrap instead of clipping on narrow screens. */
+.tuning-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.tuning-tabs button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  color: var(--color-text-muted);
+  padding: 6px 12px;
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: .04em;
+}
+
+.tuning-tabs button.active {
+  background: var(--color-elevated);
+  border-color: var(--color-border);
+  color: var(--color-text-strong);
+  box-shadow: inset 0 -2px 0 var(--color-primary);
+}
+
+/* Left sidebar of subcategories beside the checkbox list. */
+.tuning-layout {
+  display: grid;
+  grid-template-columns: minmax(150px, 200px) 1fr;
+  gap: 12px;
+  min-height: 320px;
+}
+
+.tuning-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid var(--color-border);
+  padding-right: 8px;
+}
+
+.tuning-sidebar button {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--color-text);
+  padding: 6px 8px;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.tuning-sidebar button:hover { background: var(--color-elevated); }
+
+.tuning-sidebar button.active {
+  background: var(--color-elevated);
+  border-color: var(--color-primary);
+  color: var(--color-text-strong);
+}
+
+.tuning-count { color: var(--color-text-muted); font-size: 12px; }
+
+.tuning-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tuning-panel .overlay-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tuning-empty {
+  border: 1px dashed var(--color-border);
+  padding: 16px;
+  color: var(--color-text);
+  min-height: 120px;
+}
+
+@media (max-width: 560px) {
+  .tuning-layout { grid-template-columns: 1fr; }
+  .tuning-sidebar { flex-direction: row; flex-wrap: wrap; border-right: none; padding-right: 0; }
+}
 
 /* The body gradients in editor.css are blue; the site's is a soft grey glow over the page color. */
 body {
   background: radial-gradient(1200px 480px at 50% -160px, #2a2a2a, transparent 70%) no-repeat, #0d0d0d;
+}
+
+/* editor.css gives these rows a light background, which clashes with the dark theme's light text. */
+.tuning-dialog .overlay-controls {
+  background-color: var(--color-elevated);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-strong);
+}
+
+.tuning-dialog .overlay-controls .muted { color: var(--color-text-muted); }
+
+.tuning-dialog .overlay-controls input[type="checkbox"] {
+  accent-color: var(--color-primary);
+  width: 16px;
+  height: 16px;
 }
 
 /* Car slot cards: editor.css paints these with a hardcoded blue using !important. */

@@ -1,5 +1,6 @@
 import { nfsu2Crc } from './crc32.js';
 import { PERF_PARTS } from './perf-parts.js';
+import { UNLOCK_OFFSETS } from './unlock-table.js';
 
 export const MAGIC = [0x32, 0x30, 0x43, 0x4d];
 export const HEADER_SIZE = 0x1c;
@@ -15,6 +16,7 @@ export const SLOT_HEADER_LEN = 24;
 export const CAR_KEY_REL = 0x2bc;
 export const PERF_OFF = 0x310;
 export const PERF_COUNT = PERF_PARTS.length;
+export const UNLOCK_COUNT = UNLOCK_OFFSETS.length;
 export const MAX_MONEY = 0x7fffffff;
 
 const HDR_LEN_A = 0x08;
@@ -122,8 +124,8 @@ export function getCarKey(data, slot) {
   return Array.from(data.subarray(start, start + 4), (b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
 }
 
-// Writes a donor's slot blocks (in the order given) and keeps tuning, name and money.
-// An empty slot also gets the used header copied from the first slot in use (unverified in-game).
+// Writes a donor's slot blocks (in the order given) and resets the slot's part flags to stock.
+// Name and money are kept. An empty slot also gets the used header copied from the first slot in use (unverified in-game).
 export function setSlotCar(data, slot, donor) {
   const base = slotBase(slot);
   const needsHeader = !isSlotUsed(data, slot);
@@ -144,6 +146,8 @@ export function setSlotCar(data, slot, donor) {
   for (const block of donor.blocks) {
     out.set(block.bytes, base + block.off - SLOT_BASE);
   }
+  // The donor blocks stop before the part flags, so without this the old car's parts would stay installed.
+  out.fill(0, base + PERF_OFF, base + PERF_OFF + PERF_COUNT);
   if (needsHeader) {
     const header = data.slice(slotBase(template) + SLOT_USED_OFF, slotBase(template) + SLOT_USED_OFF + SLOT_HEADER_LEN);
     out.set(header, base + SLOT_USED_OFF);
@@ -165,6 +169,27 @@ export function setPerfFlags(data, slot, indices, on) {
   const out = data.slice();
   for (const index of indices) {
     out[perfOffset(slot, index)] = on ? 1 : 0;
+  }
+  return out;
+}
+
+// Number of unlock-table bytes set to 0xFF in a slot, out of UNLOCK_COUNT.
+export function countUnlocked(data, slot) {
+  const base = slotBase(slot);
+  let count = 0;
+  for (const rel of UNLOCK_OFFSETS) {
+    if (data[base + rel] === 0xff) count++;
+  }
+  return count;
+}
+
+// Sets the unlock table bytes to 0xFF (on) or 00 (off). Only those bytes change.
+export function setUnlocks(data, slot, on) {
+  const base = slotBase(slot);
+  const out = data.slice();
+  const value = on ? 0xff : 0x00;
+  for (const rel of UNLOCK_OFFSETS) {
+    out[base + rel] = value;
   }
   return out;
 }

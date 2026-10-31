@@ -7,8 +7,10 @@ import { PERF_PARTS, PERF_CATEGORIES } from './perf-parts.js';
 import {
   checkSave, verifyChecksums, recalculateChecksums, getMoney, setMoney,
   getName, setName, validateName, isSlotUsed, getPerfFlag, setPerfFlag,
-  setPerfFlags, swapSlots, getCarKey, setSlotCar, SLOT_BASE, SLOT_STRIDE, PERF_OFF, PERF_COUNT, MONEY_OFF,
+  setPerfFlags, swapSlots, getCarKey, setSlotCar, countUnlocked, setUnlocks, UNLOCK_COUNT,
+  SLOT_BASE, SLOT_STRIDE, PERF_OFF, PERF_COUNT, MONEY_OFF,
 } from './save.js';
+import { UNLOCK_OFFSETS } from './unlock-table.js';
 import { parseCarDatabase, buildCarIndex, identifyCar } from './cars.js';
 
 const FIXTURE = fileURLToPath(new URL('./testfile/treav0r', import.meta.url));
@@ -104,6 +106,29 @@ test('checkSave rejects bad magic and bad lengths', () => {
   assert.equal(checkSave(bad).ok, false);
 });
 
+test('unlock table has 420 distinct offsets inside one car slot', () => {
+  assert.equal(UNLOCK_COUNT, 420);
+  assert.equal(new Set(UNLOCK_OFFSETS).size, UNLOCK_COUNT);
+  assert.ok(UNLOCK_OFFSETS.every((rel) => rel >= 0 && rel < SLOT_STRIDE));
+});
+
+test('setUnlocks on and off only changes unlock-table bytes of its own slot', () => {
+  const data = new Uint8Array(SLOT_BASE + 5 * SLOT_STRIDE + 16).fill(0x11);
+  const on = setUnlocks(data, 2, true);
+  const base = SLOT_BASE + 2 * SLOT_STRIDE;
+  const changed = [];
+  for (let i = 0; i < data.length; i++) if (on[i] !== data[i]) changed.push(i);
+  assert.deepEqual(changed, UNLOCK_OFFSETS.map((rel) => base + rel));
+  assert.ok(changed.every((i) => on[i] === 0xff));
+  assert.equal(countUnlocked(on, 2), UNLOCK_COUNT);
+  assert.equal(countUnlocked(on, 1), 0);
+  assert.equal(on.length, data.length);
+  assert.equal(data[base + UNLOCK_OFFSETS[0]], 0x11, 'input is not mutated');
+
+  const off = setUnlocks(on, 2, false);
+  assert.equal(countUnlocked(off, 2), 0);
+});
+
 test('fixture: checksums verify and recalculation is a no-op', { skip: !hasFixture && 'testfile/treav0r missing' }, () => {
   const data = load();
   assert.equal(checkSave(data).ok, true);
@@ -149,14 +174,15 @@ test('fixture: model keys identify the known cars and the empty slot is unknown'
   assert.equal(identifyCar(carIndex, getCarKey(data, 4)), null);
 });
 
-test('fixture: replacing a used slot changes its car, keeps tuning and recalculates cleanly', { skip: !hasFixture && 'testfile/treav0r missing' }, () => {
+test('fixture: replacing a used slot changes its car, resets parts to stock and recalculates cleanly', { skip: !hasFixture && 'testfile/treav0r missing' }, () => {
   const before = recalculateChecksums(setPerfFlag(setName(setMoney(load(), 1234), 'treav0r'), 0, 15, true));
   const target = donorNamed('Nissan 350Z');
   const after = recalculateChecksums(setSlotCar(before, 0, target));
   assert.equal(getCarKey(after, 0), target.key);
   assert.equal(identifyCar(carIndex, getCarKey(after, 0)).name, 'Nissan 350Z');
   assert.equal(isSlotUsed(after, 0), true);
-  assert.equal(getPerfFlag(after, 0, 15), true);
+  assert.equal(getPerfFlag(after, 0, 15), false);
+  for (let i = 0; i < PERF_COUNT; i++) assert.equal(getPerfFlag(after, 0, i), false);
   assert.equal(getMoney(after), 1234);
   assert.equal(getName(after), 'treav0r');
   assert.deepEqual(verifyChecksums(after), { blockA: true, blockB: true, header: true });

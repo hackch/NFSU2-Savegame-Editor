@@ -2,12 +2,21 @@ import { PERF_PARTS, PERF_CATEGORIES } from './perf-parts.js';
 import {
   checkSave, verifyChecksums, recalculateChecksums, getMoney, setMoney,
   getName, setName, isSlotUsed, getPerfFlag, setPerfFlag, setPerfFlags,
-  swapSlots as swapCarSlots, getCarKey, setSlotCar, SLOT_COUNT, PERF_COUNT,
+  swapSlots as swapCarSlots, getCarKey, setSlotCar, countUnlocked, setUnlocks,
+  SLOT_COUNT, PERF_COUNT, UNLOCK_COUNT,
 } from './save.js';
 import { parseCarDatabase, buildCarIndex, identifyCar } from './cars.js';
 
 const partsByIndex = new Map(PERF_PARTS.map((p) => [p.index, p]));
 const ALL_INDICES = PERF_PARTS.map((p) => p.index);
+
+// Top-level tuning tabs use the creator's category names. Only PERF has its part table mapped.
+const TUNING_TABS = [
+  { code: 'PERF', label: 'PERFORMANCE' },
+  { code: 'BODY', label: 'BODY PARTS' },
+  { code: 'GRAPHICS', label: 'GRAPHICS' },
+  { code: 'SPECIALTIES', label: 'SPECIALTIES' },
+];
 
 const app = angular.module('nfsu2Editor', []);
 
@@ -34,11 +43,19 @@ app.controller('EditorController', ['$scope', function ($scope) {
   $scope.form = { name: '', money: 0 };
   $scope.slots = [];
   $scope.perfTotal = PERF_COUNT;
+  $scope.unlockTotal = UNLOCK_COUNT;
   $scope.swapTarget = {};
   $scope.replaceTarget = {};
   $scope.donors = [];
   let donorIndex = new Map();
-  $scope.tuning = { open: false, slot: 0, categories: [], activeCode: PERF_CATEGORIES[0].code };
+  $scope.tuning = {
+    open: false,
+    slot: 0,
+    tabs: TUNING_TABS,
+    tab: 'PERF',
+    sub: PERF_CATEGORIES[0].code,
+    categories: [],
+  };
 
   fetch('./car-donors.json')
     .then((res) => {
@@ -75,6 +92,7 @@ app.controller('EditorController', ['$scope', function ($scope) {
         key,
         car: identifyCar(donorIndex, key),
         perfCount: ALL_INDICES.filter((i) => getPerfFlag(data, index, i)).length,
+        unlocked: countUnlocked(data, index),
       };
     });
     if ($scope.tuning.open) rebuildTuning();
@@ -82,10 +100,8 @@ app.controller('EditorController', ['$scope', function ($scope) {
 
   function rebuildTuning() {
     const slot = $scope.tuning.slot;
-    $scope.tuning.categories = PERF_CATEGORIES.map((cat) => ({
-      code: cat.code,
-      label: cat.label,
-      parts: cat.indices.map((index) => {
+    $scope.tuning.categories = PERF_CATEGORIES.map((cat) => {
+      const parts = cat.indices.map((index) => {
         const part = partsByIndex.get(index);
         return {
           index,
@@ -93,8 +109,14 @@ app.controller('EditorController', ['$scope', function ($scope) {
           verified: part.verified,
           on: getPerfFlag(data, slot, index),
         };
-      }),
-    }));
+      });
+      return {
+        code: cat.code,
+        label: cat.label,
+        parts,
+        onCount: parts.filter((p) => p.on).length,
+      };
+    });
   }
 
   function applyResult(next) {
@@ -162,13 +184,34 @@ app.controller('EditorController', ['$scope', function ($scope) {
   $scope.openTuning = function (slot) {
     $scope.tuning.slot = slot;
     $scope.tuning.open = true;
-    $scope.tuning.activeCode = PERF_CATEGORIES[0].code;
+    $scope.tuning.tab = 'PERF';
+    $scope.tuning.sub = PERF_CATEGORIES[0].code;
     rebuildTuning();
   };
 
   $scope.selectTab = function (code) {
-    $scope.tuning.activeCode = code;
+    $scope.tuning.tab = code;
   };
+
+  $scope.selectSub = function (code) {
+    $scope.tuning.sub = code;
+  };
+
+  $scope.activeTabLabel = function () {
+    const tab = TUNING_TABS.find((t) => t.code === $scope.tuning.tab);
+    return tab ? tab.label.charAt(0) + tab.label.slice(1).toLowerCase() : '';
+  };
+
+  $scope.toggleUnlocks = function (slot) {
+    const on = $scope.slots[slot].unlocked !== UNLOCK_COUNT;
+    const verb = on ? 'Unlock' : 'Lock';
+    if (!confirm(`${verb} everything in car slot ${slot + 1}? This sets the creator's unlock table for this slot. Its effect in-game is not verified.`)) {
+      return;
+    }
+    applyResult(setUnlocks(data, slot, on));
+    setStatus('success', `Slot ${slot + 1}: ${on ? 'unlock table set to all unlocked' : 'unlock table cleared'}.`);
+  };
+
 
   $scope.closeTuning = function () {
     $scope.tuning.open = false;
@@ -207,7 +250,7 @@ app.controller('EditorController', ['$scope', function ($scope) {
     const donor = $scope.donors[target];
     const current = $scope.slots[slot].car ? $scope.slots[slot].car.name : 'an unknown car';
     const verb = $scope.slots[slot].used ? `Replace ${current} in slot ${slot + 1} with ${donor.name}?` : `Put ${donor.name} in empty slot ${slot + 1}?`;
-    if (!confirm(`${verb}\n\nOnly this slot's car blocks change. Tuning is kept. Empty slots use an unverified header.`)) {
+    if (!confirm(`${verb}\n\nOnly this slot's car blocks change. Installed parts are reset to stock. Empty slots use an unverified header.`)) {
       return;
     }
     try {
