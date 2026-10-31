@@ -156,10 +156,6 @@ export function EditorController($scope: EditorScope): void {
     return $scope.slots.filter((s) => s.used).length;
   };
 
-  $scope.otherSlots = function (slot: number): SlotView[] {
-    return $scope.slots.filter((s) => s.index !== slot);
-  };
-
   $scope.applyProfile = function (): void {
     if (!data) return;
     try {

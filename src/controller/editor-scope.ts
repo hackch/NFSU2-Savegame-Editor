@@ -65,7 +65,6 @@ export interface EditorScope extends angular.IScope {
   loadFile(file: File | null): void;
   checksumText(): string;
   usedCount(): number;
-  otherSlots(slot: number): SlotView[];
   applyProfile(): void;
   openTuning(slot: number): void;
   selectTab(code: string): void;

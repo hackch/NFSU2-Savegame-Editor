@@ -73,7 +73,7 @@
                     ng-click="replaceCar(slot.index)">{{ slot.used ? 'Replace car' : 'Add car' }}</button>
           </div>
           <div class="bike-actions">
-            <select ng-model="swapTarget[slot.index]" ng-options="s.index as ('Slot ' + (s.index + 1)) for s in otherSlots(slot.index)">
+            <select ng-model="swapTarget[slot.index]" ng-options="s.index as ('Slot ' + (s.index + 1)) disable when s.index === slot.index for s in slots">
               <option value="">Swap with…</option>
             </select>
             <button type="button" class="profile-action-btn" ng-disabled="swapTarget[slot.index] === undefined || swapTarget[slot.index] === ''"
