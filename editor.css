@@ -351,6 +351,10 @@ body.resizing-sidebar {
 
 .bike-card-heading strong { color: var(--text); font-size: 12px; }
 .bike-card-heading > span { color: var(--muted); font-size: 10px; }
+.bike-card.slot-locked { border-left: 3px solid #b5523b; }
+.bike-card.slot-open { border-left: 3px solid #c9a227; }
+.bike-card.slot-filled { border-left: 3px solid #3f9d5a; }
+.bike-card .slot-state { color: var(--text); font-size: 10px; font-weight: 600; }
 .bike-add-btn { justify-self: start; }
 
 .bike-actions {

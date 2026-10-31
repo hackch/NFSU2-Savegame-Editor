@@ -10,11 +10,12 @@ import {
 } from '../model/save-file.js';
 import { getPerfFlag, setPerfFlag, setPerfFlags, PERF_COUNT } from '../model/perf.js';
 import {
-  getCarKey, isSlotUsed, isSlotLinked, isSlotLocked, setSlotCar, swapSlots, unlockAllSlots,
+  getCarKey, isCarBought, isSlotUsed, isSlotLinked, isSlotLocked, setSlotCar, setSlotLocked, slotState, swapSlots,
 } from '../model/slots.js';
 import { countUnlocked, countUnlockedCategory, setUnlocks, setUnlockCategory, UNLOCK_COUNT } from '../model/unlocks.js';
 import {
   SLOT_BASE, SLOT_STRIDE, PERF_OFF, MONEY_OFF, GARAGE_CAR_COUNT, SLOT_LINK_OFF, SLOT_LINK_LEN, SLOT_LOCK_REL,
+  SLOT_BOUGHT_REL,
 } from '../model/layout.js';
 import { parseCarDatabase, buildCarIndex, identifyCar, type Donor } from '../model/cars.js';
 
@@ -270,16 +271,42 @@ test('setSlotCar never lowers the garage count', { skip: SKIP_NO_FIXTURE }, () =
   assert.equal(out[GARAGE_CAR_COUNT], data[GARAGE_CAR_COUNT]);
 });
 
-test('fixture: unlockAllSlots raises the count to 6, clears every lock flag and links every slot without adding cars', { skip: SKIP_NO_FIXTURE }, () => {
+test('fixture: setSlotCar on a locked slot unlocks it, sets the bought flag and shows it as filled', { skip: SKIP_NO_FIXTURE }, () => {
   const data = load();
-  const out = unlockAllSlots(data);
-  assert.equal(out[GARAGE_CAR_COUNT], 6);
-  for (let i = 0; i < 5; i++) {
-    assert.equal(isSlotLocked(out, i), false);
-    assert.equal(isSlotLinked(out, i), true);
-  }
-  assert.equal(isSlotUsed(out, 4), false);
-  assert.equal(getCarKey(out, 4), '00000000');
+  assert.equal(slotState(data, 4), 'locked');
+  const out = setSlotCar(data, 4, donorNamed('Toyota Supra'));
+  assert.equal(isSlotLocked(out, 4), false);
+  assert.equal(isCarBought(out, 4), true);
+  assert.equal(out[SLOT_BASE + 4 * SLOT_STRIDE + SLOT_BOUGHT_REL], 1);
+  assert.equal(slotState(out, 4), 'filled');
+});
+
+test('fixture: an unlocked slot with no bought car is open, not filled', { skip: SKIP_NO_FIXTURE }, () => {
+  const data = load();
+  const out = setSlotCar(data, 0, donorNamed('Toyota Supra'));
+  const cleared = new Uint8Array(out);
+  cleared[SLOT_BASE + 1 * SLOT_STRIDE + SLOT_LOCK_REL] = 0;
+  cleared[SLOT_BASE + 1 * SLOT_STRIDE + SLOT_BOUGHT_REL] = 0;
+  assert.equal(slotState(cleared, 1), 'open');
+  assert.equal(slotState(cleared, 0), 'filled');
+});
+
+test('setSlotLocked changes only the lock flag of its own slot', () => {
+  const data = new Uint8Array(0xd300);
+  const out = setSlotLocked(data, 3, true);
+  assert.equal(isSlotLocked(out, 3), true);
+  assert.deepEqual(diffOffsets(data, out), [SLOT_BASE + 3 * SLOT_STRIDE + SLOT_LOCK_REL]);
+  assert.equal(isSlotLocked(setSlotLocked(out, 3, false), 3), false);
+});
+
+test('slotState gives locked priority over bought', () => {
+  const data = new Uint8Array(0xd300);
+  const base = SLOT_BASE + 2 * SLOT_STRIDE;
+  data[base + SLOT_LOCK_REL] = 1;
+  data[base + SLOT_BOUGHT_REL] = 1;
+  assert.equal(slotState(data, 2), 'locked');
+  data[base + SLOT_LOCK_REL] = 0;
+  assert.equal(slotState(data, 2), 'filled');
 });
 
 test('setSlotCar refuses when there is no used slot to copy the header from', () => {

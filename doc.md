@@ -74,17 +74,16 @@ This file records what we know about the `SPEED2.EXE` career save (`20CM` magic,
 
 - A slot is locked when its own lock flag is non-zero: `isSlotLocked` reads the byte at `slot base + 0x428`. `1` is locked, `0` is unlocked.
 - Confirmed in game: with the flag cleared on records 1–4 of `treav1r`, all 5 slots show unlocked and cars work. Setting only the garage count (`0xA175`) did not change the lock.
-- The garage count is written by `setSlotCar` and `unlockAllSlots` but is not read by the lock check. Its effect in game is unverified.
-- The byte at `+0x429` appears to be `hasCarBought` (unverified). The editor does not write it yet.
-- A slot can hold a car and still be locked. The UI shows it as "Locked", not "In use".
-- `setSlotCar` clears the lock flag of the slot it writes. `unlockAllSlots` clears all lock flags.
+- The garage count is written by `setSlotCar` but is not read by the lock check. Its effect in game is unverified.
+- The byte at `+0x429` is `hasCarBought` (strong evidence, not yet confirmed by an editor write in game). `isCarBought` reads it. `1` means a car is bought. Owned cars in `treav0r` and `Jane` all have `01` there.
+- Slot state shown in the UI (`slotState`): locked takes priority. Otherwise a bought car is `filled`, and an unlocked slot with no bought car is `open` (free for a sponsor car).
+- `setSlotCar` clears the lock flag and sets the bought flag on the slot it writes.
 
 ## Editor behaviour
 
 | Operation | What it writes |
 | --- | --- |
-| Replace car | Donor blocks 1–3 in the slot. Performance flags are zeroed. The used header and link block are copied from another slot if the target is empty. Tuning is kept otherwise |
-| Unlock all slots | Lock flags cleared on all slots. Garage count set to 6. Empty link blocks are filled from a linked slot |
+| Replace car | Donor blocks 1–3 in the slot. Performance flags are zeroed. The used header and link block are copied from another slot if the target is empty. Clears the lock flag and sets the bought flag. Raises the garage count to at most 6 |
 | Swap slots | Whole slot blocks are swapped (**experimental**, untested in game) |
 | Set money / name | Only the target field. Input values are never mutated |
 

@@ -1,5 +1,6 @@
 import type { Donor } from '../model/cars.js';
 import type { ChecksumStatus } from '../model/save-file.js';
+import type { SlotState } from '../model/slots.js';
 
 /** Result of a donor-list or file-load problem, shown in the status line. */
 export interface Status {
@@ -12,6 +13,8 @@ export interface SlotView {
   index: number;
   used: boolean;
   locked: boolean;
+  bought: boolean;
+  state: SlotState;
   key: string;
   car: Donor | null;
   perfCount: number;
@@ -72,7 +75,7 @@ export interface EditorScope extends angular.IScope {
   selectSub(code: string): void;
   activeTabLabel(): string;
   toggleUnlocks(slot: number): void;
-  unlockAllSlots(): void;
+  toggleLock(slot: number): void;
   closeTuning(): void;
   togglePart(part: PartView): void;
   setCategory(cat: CategoryView, on: boolean): void;

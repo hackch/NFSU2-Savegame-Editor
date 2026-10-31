@@ -35,6 +35,8 @@ export const SLOT_LINK_OFF = 0x294;
 export const SLOT_LINK_LEN = 16;
 /** Slot-relative lock flag; non-zero means the slot is locked. */
 export const SLOT_LOCK_REL = 0x428;
+/** Slot-relative "car bought" flag; zero on an unlocked slot means it is open for a sponsor car. */
+export const SLOT_BOUGHT_REL = 0x429;
 /** Garage car count byte. Not the lock; the per-slot flag above decides it. */
 export const GARAGE_CAR_COUNT = 0xa175;
 /** Cap of the garage car count. */

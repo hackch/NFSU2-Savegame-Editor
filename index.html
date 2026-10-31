@@ -46,25 +46,26 @@
 
     <section class="profile-section" ng-if="loaded">
       <h3>Car slots</h3>
-      <p class="muted">{{ usedCount() }} of {{ slots.length }} slots in use.</p>
-      <div class="bike-actions">
-        <button type="button" class="profile-action-btn" ng-click="unlockAllSlots()">Unlock all slots (sandbox)</button>
-      </div>
+      <p class="muted">{{ usedCount() }} of {{ slots.length }} slots filled. Open slots are unlocked and free for a sponsor car.</p>
       <div class="bike-list">
-        <article class="bike-card" ng-repeat="slot in slots track by slot.index">
+        <article class="bike-card slot-{{ slot.state }}" ng-repeat="slot in slots track by slot.index">
           <div class="bike-card-heading">
             <strong>Car slot {{ slot.index + 1 }}</strong>
-            <span>{{ slot.locked ? 'Locked' : (slot.used ? 'In use' : 'Empty') }} · {{ slot.perfCount }} / {{ perfTotal }} parts · {{ slot.unlocked }} / {{ unlockTotal }} unlocked</span>
+            <span class="slot-state">{{ slot.state === 'locked' ? 'Locked' : (slot.state === 'filled' ? 'Filled' : 'Open (free)') }}</span>
+            <span>{{ slot.perfCount }} / {{ perfTotal }} parts · {{ slot.unlocked }} / {{ unlockTotal }} unlocked</span>
           </div>
-          <p class="muted" ng-if="slot.locked">Locked by garage count. Car hidden until this slot is unlocked.</p>
-          <p class="muted" ng-if="!slot.locked">
-            {{ slot.car ? slot.car.name : (slot.key === '00000000' ? 'No car' : 'Unknown car (key ' + slot.key + ')') }}
+          <p class="muted" ng-if="slot.state === 'locked'">Locked. Its car is hidden until the slot is unlocked.</p>
+          <p class="muted">
+            {{ slot.car ? slot.car.name : (slot.key === '00000000' ? (slot.state === 'open' ? 'Open for a sponsor car' : 'No car') : 'Unknown car (key ' + slot.key + ')') }}
           </p>
           <div class="bike-actions">
+            <button type="button" class="profile-action-btn" ng-click="toggleLock(slot.index)">{{ slot.state === 'locked' ? 'Unlock slot' : 'Lock slot' }}</button>
+          </div>
+          <div class="bike-actions" ng-if="slot.state === 'filled'">
             <button type="button" class="profile-action-btn" ng-click="openTuning(slot.index)">Tuning…</button>
             <button type="button" class="profile-action-btn" ng-click="installAll(slot.index, true)">Install all</button>
             <button type="button" class="profile-action-btn" ng-click="installAll(slot.index, false)">Stock</button>
-            <button type="button" class="profile-action-btn" ng-click="toggleUnlocks(slot.index)">{{ slot.unlocked === unlockTotal ? 'Lock all' : 'Unlock all' }}</button>
+            <button type="button" class="profile-action-btn" ng-click="toggleUnlocks(slot.index)">{{ slot.unlocked === unlockTotal ? 'Lock parts' : 'Unlock parts' }}</button>
           </div>
           <div class="bike-actions">
             <select ng-model="replaceTarget[slot.index]" ng-options="d.id as d.name for d in donors" ng-disabled="!donors.length || slot.locked">
@@ -129,7 +130,7 @@
       </div>
       <div class="tuning-empty" ng-if="tuning.tab !== 'PERF'">
         <p><strong>{{ activeTabLabel() }}</strong> are not mapped yet.</p>
-        <p class="muted">The creator's unlock table is split into four categories: body parts, specialities, graphics and performance. Which byte is which individual part is not mapped yet. Use "Unlock all" on the car card for now.</p>
+        <p class="muted">The creator's unlock table is split into four categories: body parts, specialities, graphics and performance. Which byte is which individual part is not mapped yet. Use "Unlock parts" on the car card for now.</p>
       </div>
       <div class="bike-dialog-actions">
         <span></span>

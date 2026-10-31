@@ -2,7 +2,7 @@ import { PERF_CATEGORIES, PERF_PARTS, type PerfPart } from '../data/perf-parts.j
 import { parseCarDatabase, buildCarIndex, identifyCar, type Donor } from '../model/cars.js';
 import { checkSave, verifyChecksums, recalculateChecksums, getMoney, setMoney, getName, setName } from '../model/save-file.js';
 import { SLOT_COUNT } from '../model/layout.js';
-import { getCarKey, isSlotLocked, isSlotUsed, setSlotCar, swapSlots as swapCarSlots, unlockAllSlots as unlockAllCarSlots } from '../model/slots.js';
+import { getCarKey, isCarBought, isSlotLocked, isSlotUsed, setSlotCar, setSlotLocked, slotState, swapSlots as swapCarSlots } from '../model/slots.js';
 import { getPerfFlag, setPerfFlag, setPerfFlags, PERF_COUNT } from '../model/perf.js';
 import { countUnlocked, setUnlocks, UNLOCK_COUNT } from '../model/unlocks.js';
 import type { CategoryView, EditorScope, PartView, SlotView, Status, TuningTab } from './editor-scope.js';
@@ -85,6 +85,8 @@ export function EditorController($scope: EditorScope): void {
         index,
         used: isSlotUsed(bytes, index),
         locked: isSlotLocked(bytes, index),
+        bought: isCarBought(bytes, index),
+        state: slotState(bytes, index),
         key,
         car: identifyCar(donorIndex, key),
         perfCount: ALL_INDICES.filter((i) => getPerfFlag(bytes, index, i)).length,
@@ -154,7 +156,7 @@ export function EditorController($scope: EditorScope): void {
   };
 
   $scope.usedCount = function (): number {
-    return $scope.slots.filter((s) => s.used && !s.locked).length;
+    return $scope.slots.filter((s) => s.state === 'filled').length;
   };
 
   $scope.applyProfile = function (): void {
@@ -201,13 +203,11 @@ export function EditorController($scope: EditorScope): void {
     setStatus('success', `Slot ${slot + 1}: ${on ? 'unlock table set to all unlocked' : 'unlock table cleared'}.`);
   };
 
-  $scope.unlockAllSlots = function (): void {
+  $scope.toggleLock = function (slot: number): void {
     if (!data) return;
-    if (!confirm('Set the garage count to 6 and link all five car slots? Car contents are not changed. Its effect in-game is not verified.')) {
-      return;
-    }
-    applyResult(unlockAllCarSlots(data));
-    setStatus('success', 'Garage count set to 6 and all car slots linked.');
+    const locked = !isSlotLocked(data, slot);
+    applyResult(setSlotLocked(data, slot, locked));
+    setStatus('success', `Slot ${slot + 1} ${locked ? 'locked' : 'unlocked'}.`);
   };
 
   $scope.closeTuning = function (): void {

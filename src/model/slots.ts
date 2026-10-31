@@ -1,7 +1,10 @@
 import type { Donor } from './cars.js';
+
+/** What a car slot shows: locked, unlocked with no car bought (open for a sponsor car), or filled with a bought car. */
+export type SlotState = 'locked' | 'open' | 'filled';
 import {
   dataView, bytesToHex, slotBase, SLOT_BASE, SLOT_COUNT, SLOT_STRIDE, SLOT_USED_OFF, SLOT_HEADER_LEN, CAR_KEY_REL,
-  SLOT_LINK_OFF, SLOT_LINK_LEN, SLOT_LOCK_REL, GARAGE_CAR_COUNT, GARAGE_CAR_MAX, PERF_OFF,
+  SLOT_LINK_OFF, SLOT_LINK_LEN, SLOT_LOCK_REL, SLOT_BOUGHT_REL, GARAGE_CAR_COUNT, GARAGE_CAR_MAX, PERF_OFF,
 } from './layout.js';
 import { PERF_COUNT } from './perf.js';
 
@@ -48,6 +51,27 @@ export function isSlotLocked(data: Uint8Array, slot: number): boolean {
 }
 
 /**
+ * Whether the slot holds a bought car. An unlocked slot without one is open for a sponsor car.
+ * @param data Save bytes.
+ * @param slot Slot index.
+ * @returns True when the slot's bought flag is non-zero.
+ */
+export function isCarBought(data: Uint8Array, slot: number): boolean {
+  return data[slotBase(slot) + SLOT_BOUGHT_REL] !== 0;
+}
+
+/**
+ * What a slot shows: locked takes priority, then filled when a car is bought, otherwise open.
+ * @param data Save bytes.
+ * @param slot Slot index.
+ * @returns `locked`, `filled` or `open`.
+ */
+export function slotState(data: Uint8Array, slot: number): SlotState {
+  if (isSlotLocked(data, slot)) return 'locked';
+  return isCarBought(data, slot) ? 'filled' : 'open';
+}
+
+/**
  * First slot other than `slot` that satisfies the predicate.
  * @param data Save bytes.
  * @param slot Slot to skip (use -1 to skip none).
@@ -65,7 +89,7 @@ function findOtherSlot(data: Uint8Array, slot: number, predicate: (d: Uint8Array
  * Writes a donor car into a slot.
  * Donor blocks are written in order, and the slot's part flags are reset to stock.
  * Name and money are kept. An empty slot also gets the used header and link block copied from another slot.
- * The slot's lock flag is cleared, and the garage count (0xA175) is raised as before.
+ * The slot's lock flag is cleared and its bought flag is set, and the garage count (0xA175) is raised as before.
  * @param data Save bytes. Not mutated.
  * @param slot Target slot.
  * @param donor Car to write.
@@ -92,6 +116,7 @@ export function setSlotCar(data: Uint8Array, slot: number, donor: Donor): Uint8A
   // The donor blocks stop before the part flags, so without this the old car's parts would stay installed.
   out.fill(0, base + PERF_OFF, base + PERF_OFF + PERF_COUNT);
   out[base + SLOT_LOCK_REL] = 0;
+  out[base + SLOT_BOUGHT_REL] = 1;
   if (needsHeader) {
     const header = data.slice(slotBase(headerTemplate) + SLOT_USED_OFF, slotBase(headerTemplate) + SLOT_USED_OFF + SLOT_HEADER_LEN);
     out.set(header, base + SLOT_USED_OFF);
@@ -105,21 +130,15 @@ export function setSlotCar(data: Uint8Array, slot: number, donor: Donor): Uint8A
 }
 
 /**
- * Sandbox-style unlock: clears every slot's lock flag, raises the garage count to its cap and fills empty link blocks from a linked slot.
- * Car blocks and headers are left alone, so empty slots stay empty.
+ * Sets or clears a slot's own lock flag. The bought flag and car blocks are left as they are.
  * @param data Save bytes. Not mutated.
- * @returns A new array.
+ * @param slot Slot index.
+ * @param locked True to lock the slot, false to unlock it.
+ * @returns A new array with only the slot's lock flag changed.
  */
-export function unlockAllSlots(data: Uint8Array): Uint8Array {
+export function setSlotLocked(data: Uint8Array, slot: number, locked: boolean): Uint8Array {
   const out = data.slice();
-  out[GARAGE_CAR_COUNT] = GARAGE_CAR_MAX;
-  for (let i = 0; i < SLOT_COUNT; i++) out[slotBase(i) + SLOT_LOCK_REL] = 0;
-  const template = findOtherSlot(data, -1, isSlotLinked);
-  if (template < 0) return out;
-  const link = data.slice(slotBase(template) + SLOT_LINK_OFF, slotBase(template) + SLOT_LINK_OFF + SLOT_LINK_LEN);
-  for (let i = 0; i < SLOT_COUNT; i++) {
-    if (!isSlotLinked(data, i)) out.set(link, slotBase(i) + SLOT_LINK_OFF);
-  }
+  out[slotBase(slot) + SLOT_LOCK_REL] = locked ? 1 : 0;
   return out;
 }
 
