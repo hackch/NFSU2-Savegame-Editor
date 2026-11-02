@@ -8,19 +8,26 @@
   <link rel="stylesheet" href="./app.css">
 </head>
 <body ng-controller="EditorController">
-  <header>
-    <div>
-      <p class="landing-eyebrow">NEED FOR SPEED UNDERGROUND 2</p>
-      <h1>Career Save Editor</h1>
-      <p>Edit money, driver name, car slots and performance parts. Checksums are recalculated on download.</p>
+  <header class="editor-header">
+    <div class="editor-header-inner">
+      <div class="editor-brand">
+        <p class="landing-eyebrow">NEED FOR SPEED UNDERGROUND 2</p>
+        <h1>Career Save Editor</h1>
+        <p class="editor-description">Your garage. Your rules. Edit locally, then download your save.</p>
+      </div>
+      <div class="editor-build">
+        <span class="build-badge" title="Build number: UTC date and time (YYYYMMDDhhmmss)">v__APP_VERSION__ &middot; Build __BUILD_NUMBER__</span>
+        <p class="build-splash">Now with unique performance parts!</p>
+      </div>
     </div>
   </header>
 
   <main class="editor-main">
     <section class="profile-section">
       <h3>Save file</h3>
+      <p class="muted">Start with a backup. Your file stays in this browser.</p>
       <div class="editor-row">
-        <input type="file" id="file" accept="*/*" nfsu-file-change="loadFile">
+        <input type="file" id="file" aria-label="Choose career save file" accept="*/*" nfsu-file-change="loadFile">
         <span class="muted" ng-if="fileName">{{ fileName }} ({{ fileSize }} bytes)</span>
       </div>
       <p class="message" ng-class="status.type" ng-if="status.text" role="status">{{ status.text }}</p>
@@ -28,7 +35,7 @@
 
     <section class="profile-section" ng-if="loaded">
       <h3>Profile</h3>
-      <form class="bike-dialog-form" ng-submit="applyProfile()">
+      <form class="bike-dialog-form profile-form" ng-submit="applyProfile()">
         <label>
           Driver name
           <input type="text" id="nameInput" ng-model="form.name" maxlength="31">
@@ -52,10 +59,14 @@
           <div class="bike-card-heading">
             <strong>Car slot {{ slot.index + 1 }}</strong>
             <span class="slot-state">{{ slot.state === 'locked' ? 'Locked' : (slot.state === 'filled' ? 'Filled' : 'Open (free)') }}</span>
-            <span>{{ slot.perfCount }} / {{ perfTotal }} parts · {{ slot.unlocked }} / {{ unlockTotal }} unlocked</span>
+            <div class="slot-stats">
+              <span><strong>{{ slot.perfCount }} / {{ perfTotal }}</strong> performance flags</span>
+              <span><strong>{{ slot.uniqueCount }} / {{ uniqueTotal }}</strong> unique flags</span>
+              <span><strong>{{ slot.unlocked }} / {{ unlockTotal }}</strong> unlocked</span>
+            </div>
           </div>
           <p class="muted" ng-if="slot.state === 'locked'">Locked. Its car is hidden until the slot is unlocked.</p>
-          <p class="muted">
+          <p class="slot-car-name">
             {{ slot.car ? slot.car.name : (slot.key === '00000000' ? (slot.state === 'open' ? 'Open for a sponsor car' : 'No car') : 'Unknown car (key ' + slot.key + ')') }}
           </p>
           <div class="bike-actions">
@@ -63,18 +74,18 @@
           </div>
           <div class="bike-actions" ng-if="slot.state === 'filled'">
             <button type="button" class="profile-action-btn" ng-click="openTuning(slot.index)">Tuning…</button>
-            <button type="button" class="profile-action-btn" ng-click="installAll(slot.index, true)">Install all</button>
-            <button type="button" class="profile-action-btn" ng-click="installAll(slot.index, false)">Stock</button>
+            <button type="button" class="profile-action-btn" ng-click="installAll(slot.index, true)">All raw performance flags</button>
+            <button type="button" class="profile-action-btn" ng-click="installAll(slot.index, false)">Clear performance flags</button>
             <button type="button" class="profile-action-btn" ng-click="toggleUnlocks(slot.index)">{{ slot.unlocked === unlockTotal ? 'Lock parts' : 'Unlock parts' }}</button>
           </div>
-          <div class="bike-actions">
+          <div class="bike-actions slot-operation">
             <select ng-model="replaceTarget[slot.index]" ng-options="d.id as d.name for d in donors" ng-disabled="!donors.length || slot.locked">
               <option value="">{{ slot.used ? 'Replace car with…' : 'Add car…' }}</option>
             </select>
             <button type="button" class="profile-action-btn" ng-disabled="slot.locked || replaceTarget[slot.index] === undefined || replaceTarget[slot.index] === ''"
                     ng-click="replaceCar(slot.index)">{{ slot.used ? 'Replace car' : 'Add car' }}</button>
           </div>
-          <div class="bike-actions">
+          <div class="bike-actions slot-operation">
             <select ng-model="swapTarget[slot.index]" ng-options="s.index as ('Slot ' + (s.index + 1)) disable when s.index === slot.index for s in slots">
               <option value="">Swap with…</option>
             </select>
@@ -85,7 +96,11 @@
       </div>
     </section>
 
-    <section class="profile-section" ng-if="loaded">
+    <section class="profile-section download-section" ng-if="loaded">
+      <div>
+        <h3>Ready to hit the streets?</h3>
+        <p class="muted">Download a new file with recalculated checksums. Keep your original backup.</p>
+      </div>
       <button type="button" class="profile-action-btn" ng-click="download()">Download edited save</button>
     </section>
   </main>
@@ -99,7 +114,6 @@
         </div>
         <button type="button" class="bike-dialog-close" aria-label="Close dialog" ng-click="closeTuning()">×</button>
       </div>
-      <p class="muted">Parts marked "unverified" have names from the exe table but are not yet confirmed in-game.</p>
       <div class="tuning-tabs" role="tablist">
         <button type="button" role="tab" ng-repeat="tab in tuning.tabs track by tab.code"
                 ng-class="{ active: tuning.tab === tab.code }"
@@ -112,25 +126,33 @@
                   ng-class="{ active: tuning.sub === cat.code }"
                   ng-click="selectSub(cat.code)">
             {{ cat.label }}
-            <span class="tuning-count">{{ cat.onCount }}/{{ cat.parts.length }}</span>
+            <span class="tuning-count">{{ cat.onCount }}/{{ cat.activeCount }}</span>
           </button>
         </nav>
         <div class="tuning-panel" ng-repeat="cat in tuning.categories track by cat.code" ng-if="tuning.sub === cat.code">
           <div class="bike-actions">
             <strong>{{ cat.label }}</strong>
-            <button type="button" class="profile-action-btn" ng-click="setCategory(cat, true)">All</button>
-            <button type="button" class="profile-action-btn" ng-click="setCategory(cat, false)">None</button>
+            <button type="button" class="profile-action-btn" ng-click="setCategory(cat, true)">All raw flags</button>
+            <button type="button" class="profile-action-btn" ng-click="setCategory(cat, false)">Clear raw flags</button>
           </div>
-          <label class="overlay-controls" ng-repeat="part in cat.parts track by part.index">
-            <input type="checkbox" ng-model="part.on" ng-change="togglePart(part)">
-            {{ part.label }}
-            <span class="muted">{{ part.verified ? '' : '(unverified)' }}</span>
-          </label>
+          <div class="tuning-part" ng-repeat="part in cat.parts track by part.index" ng-class="{ 'tuning-inactive': !part.active }">
+            <label class="overlay-controls">
+              <input type="checkbox" ng-model="part.on" ng-change="togglePart(part)" ng-disabled="!part.active">
+              <span>{{ part.label }} <small class="muted">({{ part.packageLabel }})</small></span>
+            </label>
+          </div>
+          <section class="tuning-unique" ng-if="cat.unique">
+            <h4>Unique {{ cat.unique.label }}</h4>
+            <label class="overlay-controls">
+              <input type="checkbox" ng-model="cat.unique.on" ng-change="toggleUnique(cat.unique)">
+              Unique flag (experimental)
+            </label>
+          </section>
         </div>
       </div>
       <div class="tuning-empty" ng-if="tuning.tab !== 'PERF'">
-        <p><strong>{{ activeTabLabel() }}</strong> are not mapped yet.</p>
-        <p class="muted">The creator's unlock table is split into four categories: body parts, specialities, graphics and performance. Which byte is which individual part is not mapped yet. Use "Unlock parts" on the car card for now.</p>
+        <strong>{{ activeTabLabel() }}</strong>
+        <span class="muted">Not mapped</span>
       </div>
       <div class="bike-dialog-actions">
         <span></span>

@@ -1,6 +1,7 @@
 import type { Donor } from '../model/cars.js';
 import type { ChecksumStatus } from '../model/save-file.js';
 import type { SlotState } from '../model/slots.js';
+import type { PerfPart, UniquePerfPart } from '../data/perf-parts.js';
 
 /** Result of a donor-list or file-load problem, shown in the status line. */
 export interface Status {
@@ -18,15 +19,27 @@ export interface SlotView {
   key: string;
   car: Donor | null;
   perfCount: number;
+  uniqueCount: number;
   unlocked: number;
 }
 
 /** One performance part row in the tuning dialog. */
-export interface PartView {
-  index: number;
-  label: string;
-  verified: boolean;
+export interface PartView extends PerfPart {
   on: boolean;
+  offset: string;
+  relativeOffset: string;
+  packageLabel: string;
+  purchased: boolean;
+  purchaseOffset: string;
+  purchaseMask: string;
+}
+
+export interface UniquePartView extends UniquePerfPart {
+  on: boolean;
+  value: number;
+  hexValue: string;
+  offset: string;
+  relativeOffset: string;
 }
 
 /** One performance category in the tuning dialog. */
@@ -35,6 +48,8 @@ export interface CategoryView {
   label: string;
   parts: PartView[];
   onCount: number;
+  activeCount: number;
+  unique: UniquePartView | null;
 }
 
 /** Top-level tuning tab. */
@@ -53,6 +68,7 @@ export interface EditorScope extends angular.IScope {
   form: { name: string; money: number };
   slots: SlotView[];
   perfTotal: number;
+  uniqueTotal: number;
   unlockTotal: number;
   swapTarget: Record<number, number | string | undefined>;
   replaceTarget: Record<number, number | string | undefined>;
@@ -78,6 +94,7 @@ export interface EditorScope extends angular.IScope {
   toggleLock(slot: number): void;
   closeTuning(): void;
   togglePart(part: PartView): void;
+  toggleUnique(part: UniquePartView): void;
   setCategory(cat: CategoryView, on: boolean): void;
   installAll(slot: number, on: boolean): void;
   swapSlots(slot: number): void;

@@ -44,7 +44,8 @@ This file records what we know about the `SPEED2.EXE` career save (`20CM` magic,
 | `+0x27C` | 24 | Used header. A non-zero uint16 means the slot is used |
 | `+0x294` | 16 | Link block. All zero means not linked (does not decide the lock) |
 | `+0x2BC` | 4 | Model key (the last 4 bytes of donor block 3) |
-| `+0x310` | 68 | Performance flags, one byte each |
+| `+0x2E8` | 36 | Nine unique-performance uint32 fields; separate from ordinary installed flags |
+| `+0x310` | 68 | Installed-item flags, including 12 visual-related bytes |
 | `+0x462` | 420 | Unlock table, bytes `00` or `FF` |
 
 - Donor blocks are read from absolute offsets `0x5870`, `0x5950`, and `0x5B20`.
@@ -52,9 +53,10 @@ This file records what we know about the `SPEED2.EXE` career save (`20CM` magic,
 
 ### Performance flags
 
-- 68 parts, one byte each, at `+0x310`.
-- Only indices 15 (muffler) and 16 (cold air intake) are confirmed in game.
-- Writing these flags is required for the editor to show parts as installed, but whether the game needs them too is **unverified**.
+- 68 installed-byte positions at `slot base + 0x310 + itemId`; 66 are active in the examined archive. IDs 33/34 are retained read-only, not removed or renumbered.
+- Performance tuning and its bulk actions use 54 active non-visual IDs. IDs 56-67 are hidden and left untouched by those actions; the executable derives them from visual-part levels during a conditional refresh.
+- Purchase bits and nine unique-performance dwords are separate state. The GUI edits raw flags, not complete shop purchases/rewards.
+- See [technical.md](technical.md) for named offsets, code traces, package metadata and evidence limits. Only ordinary IDs 15/16 have in-game save-diff confirmation.
 
 ### Unlock table
 

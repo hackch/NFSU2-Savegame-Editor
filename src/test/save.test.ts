@@ -3,19 +3,26 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { nfsu2Crc } from '../model/checksum.js';
-import { PERF_PARTS, PERF_CATEGORIES } from '../data/perf-parts.js';
+import {
+  PERF_PARTS, PERF_CATEGORIES, TUNING_PERF_CATEGORIES, TUNING_PERF_INDICES, UNIQUE_PERF_PARTS,
+} from '../data/perf-parts.js';
+import { EditorController } from '../controller/editor-controller.js';
+import type { EditorScope } from '../controller/editor-scope.js';
 import { UNLOCK_OFFSETS, UNLOCK_CATEGORY_OFFSETS } from '../data/unlock-table.js';
 import {
   checkSave, verifyChecksums, recalculateChecksums, getMoney, setMoney, getName, setName, validateName,
 } from '../model/save-file.js';
-import { getPerfFlag, setPerfFlag, setPerfFlags, PERF_COUNT } from '../model/perf.js';
+import {
+  getPerfFlag, getPerfPurchased, getUniquePerfValue, perfOffset, perfPurchaseOffset,
+  setPerfFlag, setPerfFlags, setUniquePerfFlag, uniquePerfOffset, PERF_COUNT, UNIQUE_PERF_COUNT,
+} from '../model/perf.js';
 import {
   getCarKey, isCarBought, isSlotUsed, isSlotLinked, isSlotLocked, setSlotCar, setSlotLocked, slotState, swapSlots,
 } from '../model/slots.js';
 import { countUnlocked, countUnlockedCategory, setUnlocks, setUnlockCategory, UNLOCK_COUNT } from '../model/unlocks.js';
 import {
-  SLOT_BASE, SLOT_STRIDE, PERF_OFF, MONEY_OFF, GARAGE_CAR_COUNT, SLOT_LINK_OFF, SLOT_LINK_LEN, SLOT_LOCK_REL,
-  SLOT_BOUGHT_REL,
+  MAGIC, HEADER_SIZE, SLOT_BASE, SLOT_COUNT, SLOT_STRIDE, SLOT_USED_OFF, PERF_OFF, MONEY_OFF, GARAGE_CAR_COUNT,
+  SLOT_LINK_OFF, SLOT_LINK_LEN, SLOT_LOCK_REL, SLOT_BOUGHT_REL, UNIQUE_PERF_OFF,
 } from '../model/layout.js';
 import { parseCarDatabase, buildCarIndex, identifyCar, type Donor } from '../model/cars.js';
 
@@ -23,6 +30,28 @@ const FIXTURE = fileURLToPath(new URL('../../testfile/treav0r', import.meta.url)
 const hasFixture = existsSync(FIXTURE);
 const SKIP_NO_FIXTURE = !hasFixture && 'testfile/treav0r missing';
 const load = (): Uint8Array => new Uint8Array(readFileSync(FIXTURE));
+
+test('built page includes its version, numeric UTC build stamp and splash label', () => {
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const { version } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
+  assert.ok(html.includes(`v${version} &middot; Build `));
+  assert.match(html, /Build \d{14}<\/span>/);
+  assert.ok(html.includes('Now with unique performance parts!'));
+  assert.ok(!html.includes('__APP_VERSION__'));
+  assert.ok(!html.includes('__BUILD_NUMBER__'));
+});
+
+test('tuning page keeps names and controls without technical metadata', () => {
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  assert.ok(html.includes('{{ part.label }}'));
+  assert.ok(html.includes('{{ part.packageLabel }}'));
+  assert.ok(html.includes('ng-change="togglePart(part)"'));
+  assert.ok(html.includes('ng-change="toggleUnique(cat.unique)"'));
+  for (const metadata of ['tuning-part-meta', 'PERF_PART_', 'Archive price:', 'Purchase bit:',
+    'part.offset', 'part.index }}', 'cat.unique.offset', 'cat.unique.hexValue', 'uint32 LE:']) {
+    assert.ok(!html.includes(metadata), `Page should not display ${metadata}`);
+  }
+});
 
 /** Byte offsets that differ between two buffers of equal length. */
 function diffOffsets(a: Uint8Array, b: Uint8Array): number[] {
@@ -46,6 +75,266 @@ test('part table has 68 entries with verified indices 15 and 16', () => {
 test('every part index belongs to exactly one category', () => {
   const seen = PERF_CATEGORIES.flatMap((c) => c.indices).sort((a, b) => a - b);
   assert.deepEqual(seen, PERF_PARTS.map((p) => p.index));
+});
+
+test('performance tuning includes nine categories and 54 active IDs, not visual-related IDs', () => {
+  assert.deepEqual(TUNING_PERF_CATEGORIES.map((category) => category.code),
+    ['WT', 'TR', 'NO', 'EN', 'TU', 'SU', 'BR', 'EC', 'TI']);
+  assert.deepEqual(TUNING_PERF_INDICES, Array.from({ length: 56 }, (_, index) => index)
+    .filter((index) => index !== 33 && index !== 34));
+  assert.equal(TUNING_PERF_INDICES.length, 54);
+  assert.deepEqual(PERF_CATEGORIES.find((category) => category.code === 'AE')?.indices,
+    Array.from({ length: 12 }, (_, index) => index + 56));
+});
+
+test('active archive records retain IDs and describe ordinary packages, not uniques', () => {
+  const active = PERF_PARTS.filter((part) => part.active);
+  assert.equal(active.length, 66);
+  assert.equal(active.filter((part) => part.category !== 'AE').length, 54);
+  assert.deepEqual(PERF_PARTS.filter((part) => !part.active).map((part) => part.index), [33, 34]);
+  assert.equal(PERF_PARTS[12].key, 'NO_DRY_SHOT_OF_NITROUS');
+  assert.equal(PERF_PARTS[14].key, 'NO_DIRECT_PORT_NITROUS_OXIDE');
+  assert.equal(PERF_PARTS[35].key, 'SU_COIL_OVER_SUSPENSION_SYSTEM');
+  assert.equal(PERF_PARTS[36].level, 2, 'camber kit remains a Pro part at ID 36');
+  assert.equal(PERF_PARTS[35].level, 3);
+  assert.equal(PERF_PARTS[14].price, 4000);
+  assert.deepEqual(PERF_PARTS[15].conflicts, [19]);
+  assert.deepEqual(PERF_PARTS[33].conflicts, []);
+  assert.equal(PERF_PARTS[33].level, null);
+  assert.equal(PERF_PARTS[33].price, null);
+  for (const part of active) {
+    assert.ok(part.level !== null && part.level >= 1 && part.level <= 3);
+    assert.ok(part.price !== null && part.price >= 0);
+    for (const id of part.conflicts) {
+      assert.ok(PERF_PARTS[id].active);
+      assert.equal(PERF_PARTS[id].category, part.category);
+      assert.notEqual(id, part.index);
+    }
+  }
+});
+
+test('unique category names match the game category index order, without an aero guess', () => {
+  assert.equal(UNIQUE_PERF_COUNT, 9);
+  assert.deepEqual(UNIQUE_PERF_PARTS.map((part) => part.category), ['WT', 'TR', 'NO', 'EN', 'TU', 'SU', 'BR', 'EC', 'TI']);
+  assert.deepEqual(UNIQUE_PERF_PARTS.map((part) => part.key), [
+    'PERF_CATEGORY_WEIGHT_REDUCTION', 'PERF_CATEGORY_TRANSMISSION', 'PERF_CATEGORY_NOS',
+    'PERF_CATEGORY_ENGINE', 'PERF_CATEGORY_TURBO', 'PERF_CATEGORY_SUSPENSION',
+    'PERF_CATEGORY_BRAKE', 'PERF_CATEGORY_ECU', 'PERF_CATEGORY_TIRES',
+  ]);
+});
+
+test('all 45 unique offsets and writes touch only their four-byte field', () => {
+  const firstOffsets = [0x5b58, 0x634a, 0x6b3c, 0x732e, 0x7b20];
+  const data = new Uint8Array(0xd6b6).fill(0xa5);
+  for (let slot = 0; slot < 5; slot++) {
+    for (let category = 0; category < 9; category++) {
+      const offset = firstOffsets[slot] + category * 4;
+      assert.equal(uniquePerfOffset(slot, category), offset);
+      assert.equal(getUniquePerfValue(data, slot, category), 0xa5a5a5a5);
+      const out = setUniquePerfFlag(data, slot, category, true);
+      assert.deepEqual(diffOffsets(data, out), [offset, offset + 1, offset + 2, offset + 3]);
+      assert.deepEqual([...out.slice(offset, offset + 4)], [1, 0, 0, 0]);
+      assert.equal(getUniquePerfValue(out, slot, category), 1);
+      const off = setUniquePerfFlag(out, slot, category, false);
+      assert.equal(getUniquePerfValue(off, slot, category), 0);
+      assert.deepEqual([...off.slice(offset, offset + 4)], [0, 0, 0, 0]);
+      assert.equal(getUniquePerfValue(data, slot, category), 0xa5a5a5a5, 'input is immutable');
+    }
+    const unknown = SLOT_BASE + slot * SLOT_STRIDE + UNIQUE_PERF_OFF + 9 * 4;
+    assert.equal(data[unknown], 0xa5);
+  }
+});
+
+test('unique dwords and purchase bits respect a Uint8Array byteOffset', () => {
+  const backing = new Uint8Array(0xd6b6 + 20).fill(0xaa);
+  const data = backing.subarray(10, -10);
+  const offset = uniquePerfOffset(2, 4);
+  new DataView(data.buffer, data.byteOffset, data.byteLength).setUint32(offset, 0x12345678, true);
+  assert.equal(getUniquePerfValue(data, 2, 4), 0x12345678);
+  const out = setUniquePerfFlag(data, 2, 4, false);
+  assert.equal(getUniquePerfValue(out, 2, 4), 0);
+  assert.equal(getUniquePerfValue(data, 2, 4), 0x12345678);
+  data[perfPurchaseOffset(2, 67)] = 8;
+  assert.equal(getPerfPurchased(data, 2, 67), true);
+  assert.equal(getPerfPurchased(data, 2, 66), false);
+  assert.equal(backing[0], 0xaa);
+});
+
+test('ownership bits are independent of installed bytes and cover IDs beyond 63', () => {
+  const data = new Uint8Array(0xd6b6);
+  const ids = [0, 7, 8, 63, 64, 67];
+  for (const id of ids) data[perfPurchaseOffset(4, id)] |= 1 << (id & 7);
+  for (let id = 0; id < PERF_COUNT; id++) {
+    assert.equal(getPerfPurchased(data, 4, id), ids.includes(id));
+    assert.equal(getPerfFlag(data, 4, id), false);
+    assert.equal(perfOffset(4, id), SLOT_BASE + 4 * SLOT_STRIDE + 0x310 + id);
+  }
+  assert.equal(perfPurchaseOffset(4, 67), SLOT_BASE + 4 * SLOT_STRIDE + 0x58e);
+  assert.equal(getPerfFlag(setPerfFlag(data, 4, 15, true), 4, 15), true);
+  assert.equal(getPerfPurchased(data, 4, 15), false);
+});
+
+test('performance bulk edits preserve visual, unique, purchase, inactive and event-state fields', () => {
+  const data = new Uint8Array(0xd6b6).fill(0xa5);
+  for (let slot = 0; slot < SLOT_COUNT; slot++) {
+    const expected = TUNING_PERF_INDICES.map((id) => perfOffset(slot, id));
+    const out = setPerfFlags(data, slot, TUNING_PERF_INDICES, true);
+    assert.deepEqual(diffOffsets(data, out), expected);
+    const cleared = setPerfFlags(out, slot, TUNING_PERF_INDICES, false);
+    assert.deepEqual(diffOffsets(out, cleared), expected);
+    assert.equal(getUniquePerfValue(out, slot, 8), 0xa5a5a5a5);
+    assert.equal(out[perfOffset(slot, 33)], 0xa5);
+    assert.equal(out[perfOffset(slot, 34)], 0xa5);
+    for (let id = 56; id <= 67; id++) {
+      assert.equal(out[perfOffset(slot, id)], 0xa5);
+      assert.equal(cleared[perfOffset(slot, id)], 0xa5);
+    }
+  }
+});
+
+test('controller tuning and bulk controls exclude visual-related flags in every slot', async (t) => {
+  const source = new Uint8Array(0xd6b6);
+  const view = new DataView(source.buffer);
+  source.set(MAGIC);
+  view.setUint16(4, source.length & 0xffff, true);
+  view.setUint32(8, source.length - HEADER_SIZE, true);
+  view.setUint32(12, 0, true);
+  for (let slot = 0; slot < SLOT_COUNT; slot++) {
+    view.setUint16(SLOT_BASE + slot * SLOT_STRIDE + SLOT_USED_OFF, 1, true);
+    source[SLOT_BASE + slot * SLOT_STRIDE + SLOT_BOUGHT_REL] = 1;
+    for (let index = 0; index < UNIQUE_PERF_COUNT; index++) {
+      view.setUint32(uniquePerfOffset(slot, index), 0x10203040 + slot * 16 + index, true);
+    }
+    for (let index = 0; index <= 64; index += 8) {
+      source[perfPurchaseOffset(slot, index)] = 0x30 + slot + index / 8;
+    }
+    source[perfOffset(slot, 33)] = 0xc1;
+    source[perfOffset(slot, 34)] = 0xc2;
+    for (let index = 56; index <= 67; index++) {
+      source[perfOffset(slot, index)] = 0x80 + slot * 12 + index - 56;
+    }
+  }
+
+  function replaceProperty(target: object, key: PropertyKey, value: unknown): void {
+    const original = Object.getOwnPropertyDescriptor(target, key);
+    Object.defineProperty(target, key, { configurable: true, writable: true, value });
+    t.after(() => {
+      if (original) Object.defineProperty(target, key, original);
+      else Reflect.deleteProperty(target, key);
+    });
+  }
+
+  class TestFileReader {
+    result = source.buffer.slice(0);
+    onload: (() => void) | null = null;
+    readAsArrayBuffer(): void {
+      assert.ok(this.onload);
+      this.onload();
+    }
+  }
+
+  const downloads: Blob[] = [];
+  const confirmations: string[] = [];
+  let acceptConfirmation = true;
+  replaceProperty(globalThis, 'FileReader', TestFileReader);
+  replaceProperty(globalThis, 'fetch', () => Promise.resolve({ ok: true, json: async () => ({}) }));
+  replaceProperty(globalThis, 'confirm', (message: string) => {
+    confirmations.push(message);
+    return acceptConfirmation;
+  });
+  replaceProperty(globalThis, 'document', {
+    createElement: () => ({ click() {}, remove() {} }),
+    body: { appendChild() {} },
+  });
+  replaceProperty(URL, 'createObjectURL', (blob: Blob) => {
+    downloads.push(blob);
+    return 'blob:controller-test';
+  });
+
+  const scope = {
+    $apply(callback: () => void) { callback(); },
+    $evalAsync(callback: () => void) { callback(); },
+  } as EditorScope;
+  EditorController(scope);
+  scope.loadFile({ name: 'synthetic-save' } as File);
+  assert.equal(scope.loaded, true);
+  assert.equal(scope.perfTotal, 54);
+  assert.deepEqual(scope.slots.map((slot) => slot.perfCount), [0, 0, 0, 0, 0]);
+
+  async function snapshot(): Promise<Uint8Array> {
+    scope.download();
+    const blob = downloads.pop();
+    assert.ok(blob);
+    return new Uint8Array(await blob.arrayBuffer());
+  }
+
+  function payloadDiff(before: Uint8Array, after: Uint8Array): number[] {
+    return diffOffsets(before, after).filter((offset) => offset >= HEADER_SIZE);
+  }
+
+  const baseline = await snapshot();
+  scope.openTuning(0);
+  const firstCategory = scope.tuning.categories[0];
+  const hiddenPart = { ...firstCategory.parts[0], index: 56, on: false };
+  scope.togglePart(hiddenPart);
+  assert.equal(scope.status.type, 'error');
+  assert.deepEqual(payloadDiff(baseline, await snapshot()), []);
+  scope.setCategory({ ...firstCategory, code: 'AE', parts: [hiddenPart] }, false);
+  assert.equal(scope.status.type, 'error');
+  assert.deepEqual(payloadDiff(baseline, await snapshot()), []);
+
+  const forgedCategory = { ...firstCategory, parts: [hiddenPart] };
+  scope.setCategory(forgedCategory, true);
+  const categoryOn = await snapshot();
+  const categoryOffsets = firstCategory.parts.filter((part) => part.active).map((part) => perfOffset(0, part.index));
+  assert.deepEqual(payloadDiff(baseline, categoryOn), categoryOffsets);
+  scope.setCategory(forgedCategory, false);
+  assert.deepEqual(payloadDiff(baseline, await snapshot()), []);
+
+  acceptConfirmation = false;
+  scope.installAll(0, true);
+  assert.deepEqual(payloadDiff(baseline, await snapshot()), []);
+  acceptConfirmation = true;
+
+  for (let slot = 0; slot < SLOT_COUNT; slot++) {
+    scope.openTuning(slot);
+    assert.deepEqual(scope.tuning.categories.map((category) => category.code),
+      ['WT', 'TR', 'NO', 'EN', 'TU', 'SU', 'BR', 'EC', 'TI']);
+    assert.equal(scope.tuning.categories.flatMap((category) => category.parts).length, 56);
+    assert.equal(scope.tuning.categories.filter((category) => category.unique !== null).length, 9);
+    const before = await snapshot();
+    const expected = TUNING_PERF_INDICES.map((index) => perfOffset(slot, index));
+    scope.installAll(slot, true);
+    assert.equal(scope.slots[slot].perfCount, 54);
+    const enabled = await snapshot();
+    assert.deepEqual(payloadDiff(before, enabled), expected);
+    scope.installAll(slot, false);
+    assert.equal(scope.slots[slot].perfCount, 0);
+    const cleared = await snapshot();
+    assert.deepEqual(payloadDiff(enabled, cleared), expected);
+    assert.deepEqual(payloadDiff(baseline, cleared), []);
+  }
+  assert.ok(confirmations.some((message) => message.includes('54 active performance part flags')
+    && message.includes('Superseded parts')));
+});
+
+test('invalid tuning addresses and truncated unique/ownership reads throw', () => {
+  const data = new Uint8Array(0xd6b6);
+  for (const index of [-1, 9, 0.5, NaN, Infinity]) {
+    assert.throws(() => uniquePerfOffset(0, index), RangeError);
+    assert.throws(() => setUniquePerfFlag(data, 0, index, true), RangeError);
+  }
+  for (const slot of [-1, 5, 0.5, NaN]) {
+    assert.throws(() => uniquePerfOffset(slot, 0), RangeError);
+    assert.throws(() => perfPurchaseOffset(slot, 0), RangeError);
+  }
+  for (const index of [-1, 68, 0.5, NaN]) {
+    assert.throws(() => perfPurchaseOffset(0, index), RangeError);
+  }
+  const short = new Uint8Array(uniquePerfOffset(0, 0) + 3);
+  assert.throws(() => getUniquePerfValue(short, 0, 0), RangeError);
+  assert.throws(() => setUniquePerfFlag(short, 0, 0, true), RangeError);
+  assert.throws(() => getPerfPurchased(new Uint8Array(1), 0, 0), RangeError);
 });
 
 test('name validation', () => {

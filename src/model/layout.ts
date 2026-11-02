@@ -43,6 +43,10 @@ export const GARAGE_CAR_COUNT = 0xa175;
 export const GARAGE_CAR_MAX = 6;
 /** Slot-relative start of the performance part flags, one byte per part. */
 export const PERF_OFF = 0x310;
+/** Slot-relative start of nine unique-performance uint32 fields. */
+export const UNIQUE_PERF_OFF = 0x2e8;
+/** Slot-relative start of the indexed performance ownership bitset. */
+export const PERF_PURCHASE_OFF = 0x586;
 
 /**
  * DataView over the same bytes as a Uint8Array.

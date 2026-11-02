@@ -9,7 +9,8 @@ The live site is deployed to GitHub Pages from `main`. See [doc.md](doc.md) for 
 - Edit driver name and money, with checksums recalculated on download.
 - View each car slot's make and model, read from the model key.
 - Replace or add a car in a slot. Tuning is kept.
-- Install or stock performance parts, swap slots (experimental), and unlock all slots.
+- Edit mapped performance parts and separate unique-performance flags (experimental).
+- Swap slots (experimental) and unlock all slots.
 
 ## Development
 
@@ -21,6 +22,8 @@ npm run build    # compiles src/ to dist/ and copies static files
 npm test         # build, then run the test suite
 npm run clean    # remove dist/
 ```
+
+Each build stamps the header with the package version and a UTC build number (`YYYYMMDDhhmmss`). The splash label lives in `index.html`; update it for the next feature milestone.
 
 The source layout is:
 
@@ -69,7 +72,9 @@ Then open `http://127.0.0.1:8765/index.html`.
 - **Replace car** writes only the slot's own blocks (`+0x000`, `+0x0E0`, `+0x2B0`). Save-wide blocks are not touched. Filling an empty slot copies the used-slot header from another slot, which is unverified. Test in game before relying on it.
 - Cars that share a model key (base, sponsor and intro versions) show the first name listed.
 - **Swap (experimental)** copies a whole car slot block. It has not been tested in-game.
-- **Install all** turns on all 68 performance-part flags. Only the muffler (15) and cold air intake (16) flags are verified in-game.
+- **Tuning** shows performance part names and ordinary packages, without internal keys, offsets, prices or purchase-bit details. Inactive parts are disabled and visual-related flags are not shown. Technical mappings are recorded in [technical.md](technical.md).
+- **All raw performance flags** enables the 54 active performance bytes, including mutually exclusive parts; it warns because this is not the game's apply routine. **Clear performance flags** clears those bytes. Neither changes the visual-related flags, purchase bookkeeping, inactive IDs or unique dwords. Only the muffler (15) and cold air intake (16) edits are confirmed by in-game save diffs.
+- **Unique** controls edit separate per-car category flags. Edits require confirmation and do not emulate the unique shop's event-status update or full reward process. See [technical.md](technical.md) for the code trace and evidence limits.
 - **Unlock all** sets the 420 bytes that NFSU2-ProfileCreator writes as `0xFF` in each car slot (ranges in [src/data/unlock-table.ts](src/data/unlock-table.ts), offsets `+0x462` to `+0x7E1`). It only writes those bytes. The byte-to-part mapping and the in-game effect are not verified yet.
 
 ## Tests

@@ -1,14 +1,19 @@
-import { PERF_CATEGORIES, PERF_PARTS, type PerfPart } from '../data/perf-parts.js';
+import {
+  PERF_PARTS, TUNING_PERF_CATEGORIES, TUNING_PERF_INDICES, UNIQUE_PERF_PARTS, type PerfPart,
+} from '../data/perf-parts.js';
 import { parseCarDatabase, buildCarIndex, identifyCar, type Donor } from '../model/cars.js';
 import { checkSave, verifyChecksums, recalculateChecksums, getMoney, setMoney, getName, setName } from '../model/save-file.js';
-import { SLOT_COUNT } from '../model/layout.js';
+import { PERF_OFF, SLOT_COUNT, UNIQUE_PERF_OFF } from '../model/layout.js';
 import { getCarKey, isCarBought, isSlotLocked, isSlotUsed, setSlotCar, setSlotLocked, slotState, swapSlots as swapCarSlots } from '../model/slots.js';
-import { getPerfFlag, setPerfFlag, setPerfFlags, PERF_COUNT } from '../model/perf.js';
+import {
+  getPerfFlag, getPerfPurchased, getUniquePerfValue, perfOffset, perfPurchaseOffset,
+  setPerfFlag, setPerfFlags, setUniquePerfFlag, uniquePerfOffset, UNIQUE_PERF_COUNT,
+} from '../model/perf.js';
 import { countUnlocked, setUnlocks, UNLOCK_COUNT } from '../model/unlocks.js';
-import type { CategoryView, EditorScope, PartView, SlotView, Status, TuningTab } from './editor-scope.js';
+import type { CategoryView, EditorScope, PartView, SlotView, Status, TuningTab, UniquePartView } from './editor-scope.js';
 
 const partsByIndex = new Map<number, PerfPart>(PERF_PARTS.map((p) => [p.index, p]));
-const ALL_INDICES = PERF_PARTS.map((p) => p.index);
+const tuningPerfIndexSet = new Set(TUNING_PERF_INDICES);
 
 /** Top-level tuning tabs use the creator's category names. Only PERF has its part table mapped. */
 const TUNING_TABS: TuningTab[] = [
@@ -35,7 +40,8 @@ export function EditorController($scope: EditorScope): void {
   $scope.status = { type: '', text: '' };
   $scope.form = { name: '', money: 0 };
   $scope.slots = [];
-  $scope.perfTotal = PERF_COUNT;
+  $scope.perfTotal = TUNING_PERF_INDICES.length;
+  $scope.uniqueTotal = UNIQUE_PERF_COUNT;
   $scope.unlockTotal = UNLOCK_COUNT;
   $scope.swapTarget = {};
   $scope.replaceTarget = {};
@@ -45,7 +51,7 @@ export function EditorController($scope: EditorScope): void {
     slot: 0,
     tabs: TUNING_TABS,
     tab: 'PERF',
-    sub: PERF_CATEGORIES[0].code,
+    sub: TUNING_PERF_CATEGORIES[0].code,
     categories: [],
   };
 
@@ -89,7 +95,8 @@ export function EditorController($scope: EditorScope): void {
         state: slotState(bytes, index),
         key,
         car: identifyCar(donorIndex, key),
-        perfCount: ALL_INDICES.filter((i) => getPerfFlag(bytes, index, i)).length,
+        perfCount: TUNING_PERF_INDICES.filter((i) => getPerfFlag(bytes, index, i)).length,
+        uniqueCount: UNIQUE_PERF_PARTS.filter((p) => getUniquePerfValue(bytes, index, p.index) !== 0).length,
         unlocked: countUnlocked(bytes, index),
       };
     });
@@ -100,13 +107,36 @@ export function EditorController($scope: EditorScope): void {
     if (!data) return;
     const bytes = data;
     const slot = $scope.tuning.slot;
-    $scope.tuning.categories = PERF_CATEGORIES.map((cat): CategoryView => {
+    $scope.tuning.categories = TUNING_PERF_CATEGORIES.map((cat): CategoryView => {
       const parts = cat.indices.map((index): PartView => {
         const part = partsByIndex.get(index);
         if (!part) throw new Error(`Unknown performance part index ${index}`);
-        return { index, label: part.label, verified: part.verified, on: getPerfFlag(bytes, slot, index) };
+        return {
+          ...part,
+          on: getPerfFlag(bytes, slot, index),
+          offset: hex(perfOffset(slot, index)),
+          relativeOffset: hex(PERF_OFF + index),
+          packageLabel: part.level === null ? 'Not in active table' : ['Street', 'Pro', 'Extreme'][part.level - 1],
+          purchased: getPerfPurchased(bytes, slot, index),
+          purchaseOffset: hex(perfPurchaseOffset(slot, index)),
+          purchaseMask: hex(1 << (index & 7), 2),
+        };
       });
-      return { code: cat.code, label: cat.label, parts, onCount: parts.filter((p) => p.on).length };
+      const uniquePart = UNIQUE_PERF_PARTS.find((part) => part.category === cat.code);
+      let unique: UniquePartView | null = null;
+      if (uniquePart) {
+        const value = getUniquePerfValue(bytes, slot, uniquePart.index);
+        unique = {
+          ...uniquePart, value, on: value !== 0, hexValue: hex(value, 8),
+          offset: hex(uniquePerfOffset(slot, uniquePart.index)),
+          relativeOffset: hex(UNIQUE_PERF_OFF + uniquePart.index * 4),
+        };
+      }
+      return {
+        code: cat.code, label: cat.label, parts, unique,
+        onCount: parts.filter((p) => p.active && p.on).length,
+        activeCount: parts.filter((p) => p.active).length,
+      };
     });
   }
 
@@ -175,7 +205,7 @@ export function EditorController($scope: EditorScope): void {
     $scope.tuning.slot = slot;
     $scope.tuning.open = true;
     $scope.tuning.tab = 'PERF';
-    $scope.tuning.sub = PERF_CATEGORIES[0].code;
+    $scope.tuning.sub = TUNING_PERF_CATEGORIES[0].code;
     rebuildTuning();
   };
 
@@ -216,20 +246,54 @@ export function EditorController($scope: EditorScope): void {
 
   $scope.togglePart = function (part: PartView): void {
     if (!data) return;
+    if (!partsByIndex.get(part.index)?.active) {
+      rebuildTuning();
+      setStatus('error', 'This ID is absent from the examined active item table; its bytes were left unchanged.');
+      return;
+    }
+    if (!tuningPerfIndexSet.has(part.index)) {
+      rebuildTuning();
+      setStatus('error', 'This ID is not available in performance tuning; its bytes were left unchanged.');
+      return;
+    }
     applyResult(setPerfFlag(data, $scope.tuning.slot, part.index, part.on));
+  };
+
+  $scope.toggleUnique = function (part: UniquePartView): void {
+    if (!data) return;
+    if (!confirm(`${part.on ? 'Enable' : 'Disable'} unique ${part.label}?\n\nExperimental flag-only edit, not a complete reward. Keep a backup.`)) {
+      rebuildTuning();
+      return;
+    }
+    try {
+      applyResult(setUniquePerfFlag(data, $scope.tuning.slot, part.index, part.on));
+      setStatus('success', `Unique ${part.label} flag updated. Download to save.`);
+    } catch (err) {
+      rebuildTuning();
+      setStatus('error', errorMessage(err));
+    }
   };
 
   $scope.setCategory = function (cat: CategoryView, on: boolean): void {
     if (!data) return;
-    applyResult(setPerfFlags(data, $scope.tuning.slot, cat.parts.map((p) => p.index), on));
+    const category = TUNING_PERF_CATEGORIES.find((item) => item.code === cat.code);
+    if (!category) {
+      rebuildTuning();
+      setStatus('error', 'This category is not available in performance tuning; its bytes were left unchanged.');
+      return;
+    }
+    if (on && !confirm(`Set all active ${category.label} raw flags, including conflicting parts?`)) {
+      return;
+    }
+    applyResult(setPerfFlags(data, $scope.tuning.slot, category.indices.filter((index) => tuningPerfIndexSet.has(index)), on));
   };
 
   $scope.installAll = function (slot: number, on: boolean): void {
     if (!data) return;
-    if (on && !confirm('Install every part flag on this car? Only muffler and cold air intake are verified in-game.')) {
+    if (on && !confirm(`Set all ${TUNING_PERF_INDICES.length} active performance part flags on this car? Superseded parts (for example the upgrade muffler under a full catback) will also be set, which the game does not do. Only muffler and cold air intake are verified in-game. Purchase bits, inactive IDs and unique dwords stay unchanged.`)) {
       return;
     }
-    applyResult(setPerfFlags(data, slot, ALL_INDICES, on));
+    applyResult(setPerfFlags(data, slot, TUNING_PERF_INDICES, on));
   };
 
   $scope.swapSlots = function (slot: number): void {
@@ -290,4 +354,8 @@ export function EditorController($scope: EditorScope): void {
  */
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function hex(value: number, digits = 4): string {
+  return `0x${value.toString(16).toUpperCase().padStart(digits, '0')}`;
 }
