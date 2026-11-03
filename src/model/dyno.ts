@@ -118,6 +118,19 @@ export const MPH_TO_KMH = 1.609344;
 /** Optimization goals for {@link optimizeSetup}. */
 export type DynoGoal = 'quarter' | 'accel60' | 'accel' | 'top' | 'power' | 'torque';
 
+/** Three slider positions: acceleration, balanced, top speed. */
+export type DynoPreference = 0 | 1 | 2;
+
+export interface GearPowerWindow {
+  fromGear: number;
+  shiftRpm: number;
+  landingRpm: number;
+  /** Fraction of engine RPM retained across the shift. */
+  retention: number;
+  /** Mean power across the recovered RPM interval, divided by peak power. */
+  powerCoverage: number;
+}
+
 /** Car-related data of a save slot that the dyno needs. */
 export interface SlotDyno {
   hash: number;
@@ -582,6 +595,28 @@ export class DynoModel {
     const p = this.tuned(setup);
     return { ...dragSim(p, this.car.index), topSpeed: topSpeed(p) * MPH, ...peaks(p) };
   }
+
+  /** Power-band coverage for every forward shift, including those outside a timed run. */
+  gearPowerWindows(setup: ArrayLike<number>): GearPowerWindow[] {
+    const p = this.tuned(setup);
+    const { tab, idle, inv } = torqueTable(p);
+    const peak = peaks(p).peakPower;
+    const sh = shiftPoints(p);
+    const power = (rpm: number) => interp(tab, idle, inv, rpm) * rpm * RAD_PER_RPM;
+    return Array.from({ length: Math.max(0, p.gearCount - 1) }, (_, i) => {
+      const retention = g(p, 0x1dc + 4 * i) / g(p, 0x1d8 + 4 * i);
+      const shiftRpm = sh[i + 2] - 100;
+      const landingRpm = shiftRpm * retention;
+      // Integrate over the RPM recovered after shifting, rather than judging just peak power.
+      const steps = Math.max(1, Math.ceil((shiftRpm - landingRpm) / 50));
+      let sum = 0;
+      for (let j = 0; j <= steps; j++) {
+        sum += power(landingRpm + (shiftRpm - landingRpm) * j / steps) * (j === 0 || j === steps ? 0.5 : 1);
+      }
+      return { fromGear: i + 1, shiftRpm, landingRpm, retention,
+        powerCoverage: peak > 0 ? clamp(sum / steps / peak, 0, 1) : 0 };
+    });
+  }
 }
 
 /**
@@ -704,7 +739,8 @@ function score(r: DynoResult, goal: DynoGoal): number {
 
 /**
  * Searches the ECU and turbo curve bytes that give the best dyno result for a goal.
- * Optionally includes unlocked gearing for time/speed goals; peak output is independent of gearing.
+ * Optional gearing balances the selected goal with all-shift power coverage and RPM spacing.
+ * Peak output is independent of gearing.
  * @param model Dyno model of the car.
  * @param setup Current 41 setup bytes.
  * @param goal What to optimize.
@@ -713,15 +749,46 @@ function score(r: DynoResult, goal: DynoGoal): number {
  */
 export function optimizeSetup(model: DynoModel, setup: ArrayLike<number>, goal: DynoGoal = 'quarter', gearing = false):
   { setup: Uint8Array; before: DynoResult; after: DynoResult } {
+  return searchSetup(model, setup, goal, gearing);
+}
+
+function searchSetup(model: DynoModel, setup: ArrayLike<number>, goal: DynoGoal, gearing: boolean,
+  objective: (result: DynoResult) => number = (result) => score(result, goal),
+  accepts: (result: DynoResult) => boolean = () => true, budgetReference?: DynoResult, limitGoalLoss = true):
+  { setup: Uint8Array; before: DynoResult; after: DynoResult } {
   const indices: number[] = [];
-  if (gearing && goal !== 'power' && goal !== 'torque') indices.push(...model.gearingParameters);
+  const gearIndices = gearing && goal !== 'power' && goal !== 'torque' ? model.gearingParameters : [];
+  indices.push(...gearIndices);
   if (model.ecuTunable) for (let i = 0; i < CURVE_POINTS; i++) indices.push(ECU_OFF + i);
   if (model.turboTunable) for (let i = 0; i < CURVE_POINTS; i++) indices.push(TURBO_OFF + i);
   const start = Uint8Array.from(setup);
   const before = model.evaluate(start);
   if (!indices.length) return { setup: start, before, after: before };
 
-  const evalScore = (bytes: Uint8Array) => score(model.evaluate(bytes), goal);
+  const reference = start.slice();
+  for (const idx of gearIndices) reference[idx] = NEUTRAL_BYTE;
+  const referenceWindows = gearIndices.some((idx) => idx !== 9) ? model.gearPowerWindows(reference) : [];
+  const evenRetention = referenceWindows.length
+    ? Math.pow(referenceWindows.reduce((product, window) => product * window.retention, 1), 1 / referenceWindows.length) : 0;
+  const initialScore = objective(budgetReference ?? before);
+  const scale = Number.isFinite(initialScore) ? Math.max(1, Math.abs(initialScore)) : 1;
+  const evalScore = (bytes: Uint8Array) => {
+    const result = model.evaluate(bytes);
+    if (!accepts(result)) return Infinity;
+    const value = objective(result);
+    if (!referenceWindows.length) return value;
+    if (limitGoalLoss && Number.isFinite(initialScore) && value > initialScore + scale * 0.05) return Infinity;
+    const windows = model.gearPowerWindows(bytes);
+    // Do not trade an unvisited shift's RPM drop for a better short-run result.
+    if (windows.some((window, i) => !Number.isFinite(window.retention) || window.retention <= 0 ||
+      window.retention >= 1 || window.retention < Math.min(referenceWindows[i].retention, evenRetention) - 1e-6)) return Infinity;
+    const gaps = windows.map((window) => -Math.log(window.retention));
+    const meanGap = gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length;
+    const unevenness = gaps.reduce((sum, gap) => sum + (gap - meanGap) ** 2, 0) / gaps.length / (meanGap ** 2);
+    const meanCoverage = windows.reduce((sum, window) => sum + window.powerCoverage, 0) / windows.length;
+    const worstCoverage = Math.min(...windows.map((window) => window.powerCoverage));
+    return value / scale + 0.2 * (1 - meanCoverage) + 0.4 * (1 - worstCoverage) + 0.1 * unevenness;
+  };
   const descend = (initial: Uint8Array): { bytes: Uint8Array; value: number } => {
     const cur = initial.slice();
     let best = evalScore(cur);
@@ -750,15 +817,47 @@ export function optimizeSetup(model: DynoModel, setup: ArrayLike<number>, goal: 
   };
 
   const seeds: Uint8Array[] = [start.slice()];
+  if (referenceWindows.length) seeds.push(reference);
   for (const fill of [NEUTRAL_BYTE, 0, MAX_TUNE_BYTE]) {
     const seed = start.slice();
     for (const idx of indices) seed[idx] = fill;
     seeds.push(seed);
   }
-  let best: { bytes: Uint8Array; value: number } = { bytes: start, value: score(before, goal) };
+  let best: { bytes: Uint8Array; value: number } = { bytes: start, value: evalScore(start) };
   for (const seed of seeds) {
     const r = descend(seed);
     if (r.value < best.value - 1e-9) best = r;
   }
+  if (referenceWindows.length && !Number.isFinite(best.value)) {
+    throw new Error(`No smooth gearing setup was found${limitGoalLoss ? ' within the 5% performance budget' : ''}. Disable gearing optimization or reset the gear tuning and try again.`);
+  }
   return { setup: best.bytes, before, after: model.evaluate(best.bytes) };
+}
+
+/**
+ * Builds engine power, tunes for the slider preference, then refines power without
+ * worsening any acceleration time or speed. Gearing is frozen during power passes.
+ */
+export function optimizeDynoSetup(model: DynoModel, setup: ArrayLike<number>, preference: DynoPreference = 1, gearing = false):
+  { setup: Uint8Array; before: DynoResult; after: DynoResult; stages: { power: DynoResult; goal: DynoResult } } {
+  if (preference !== 0 && preference !== 1 && preference !== 2) throw new Error('Select a valid dyno goal.');
+  const power = searchSetup(model, setup, 'power', false);
+  const weights = preference === 0 ? [0.4, 0.25, 0.3, 0.05] :
+    preference === 1 ? [0.2, 0.2, 0.3, 0.3] : [0.05, 0.05, 0.1, 0.8];
+  const baseline = power.after;
+  const timeTerm = (value: number, reference: number, weight: number) =>
+    Number.isFinite(reference) ? weight * value / Math.max(reference, 1e-6) : 0;
+  const objective = (r: DynoResult) =>
+    timeTerm(r.t60, baseline.t60, weights[0]) + timeTerm(r.t100, baseline.t100, weights[1]) +
+    timeTerm(r.quarterExact, baseline.quarterExact, weights[2]) -
+    weights[3] * r.topSpeed / Math.max(baseline.topSpeed, 1);
+  let goal = searchSetup(model, power.setup, 'quarter', gearing, objective, () => true, power.after, false);
+  goal = searchSetup(model, goal.setup, 'quarter', gearing, objective, () => true, power.after, false);
+  const target = goal.after;
+  const noSlower = (r: DynoResult) => r.t60 <= target.t60 && r.t100 <= target.t100 &&
+    r.quarterMile <= target.quarterMile && r.quarterExact <= target.quarterExact &&
+    r.topSpeed >= target.topSpeed && r.trapSpeed >= target.trapSpeed;
+  const refined = searchSetup(model, goal.setup, 'power', false, (r) => -r.peakPower, noSlower);
+  return { setup: refined.setup, before: power.before, after: refined.after,
+    stages: { power: power.after, goal: goal.after } };
 }

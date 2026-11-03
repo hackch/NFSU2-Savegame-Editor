@@ -13,7 +13,7 @@ import { countUnlocked, setUnlocks, UNLOCK_COUNT } from '../model/unlocks.js';
 import { TRAFFIC_CARS } from '../data/traffic-cars.js';
 import { setSlotTrafficCar } from '../model/slots.js';
 import {
-  DynoModel, findCar, KW_TO_HP, MPH_TO_KMH, NM_TO_LBFT, optimizeSetup, parseGameData, readSlotDyno, setSetupTuning, SETUP_NAMES,
+  DynoModel, findCar, KW_TO_HP, MPH_TO_KMH, NM_TO_LBFT, optimizeDynoSetup, parseGameData, readSlotDyno, setSetupTuning, SETUP_NAMES,
   type DynoResult, type GameData,
 } from '../model/dyno.js';
 import type {
@@ -70,7 +70,7 @@ export function EditorController($scope: EditorScope): void {
     sub: TUNING_PERF_CATEGORIES[0].code,
     categories: [],
     dyno: {
-      gameName: '', gameError: '', setup: 1, setupNames: SETUP_NAMES, goal: 'quarter', optimizeGearing: false,
+      gameName: '', gameError: '', setup: 1, setupNames: SETUP_NAMES, goal: 1, optimizeGearing: false,
       carName: '', blocked: '', busy: false, rows: [], hasProposal: false,
     },
   };
@@ -447,7 +447,7 @@ export function EditorController($scope: EditorScope): void {
     setTimeout(() => {
       $scope.$apply(() => {
         try {
-          const result = optimizeSetup(built.model, built.setups[setup], goal, gearing);
+          const result = optimizeDynoSetup(built.model, built.setups[setup], goal, gearing);
           if (view.goal === goal && view.optimizeGearing === gearing) {
             proposal = { slot, setup, gearing, bytes: result.setup, before: result.before, after: result.after };
           }

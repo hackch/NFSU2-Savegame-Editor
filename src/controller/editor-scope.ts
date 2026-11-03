@@ -2,7 +2,7 @@ import type { Donor } from '../model/cars.js';
 import type { ChecksumStatus } from '../model/save-file.js';
 import type { SlotState } from '../model/slots.js';
 import type { PerfPart, UniquePerfPart } from '../data/perf-parts.js';
-import type { DynoGoal } from '../model/dyno.js';
+import type { DynoPreference } from '../model/dyno.js';
 
 /** Result of a donor-list or file-load problem, shown in the status line. */
 export interface Status {
@@ -77,7 +77,7 @@ export interface DynoView {
   gameError: string;
   setup: number;
   setupNames: string[];
-  goal: DynoGoal;
+  goal: DynoPreference;
   optimizeGearing: boolean;
   carName: string;
   /** Empty when the car can be tuned, else the reason it cannot. */

@@ -28,7 +28,7 @@ import {
 } from '../model/layout.js';
 import { parseCarDatabase, buildCarIndex, identifyCar, type Donor } from '../model/cars.js';
 import {
-  DynoModel, ECU_OFF, MAX_TUNE_BYTE, SETUP_SIZE, TUNING_OFF, findCar, optimizeSetup, parseGameData, readSlotDyno,
+  DynoModel, ECU_OFF, MAX_TUNE_BYTE, SETUP_SIZE, TUNING_OFF, findCar, optimizeSetup, optimizeDynoSetup, parseGameData, readSlotDyno,
   setSetupCurves, setSetupTuning, setupOffset,
   type DynoGoal, type DynoResult,
 } from '../model/dyno.js';
@@ -60,15 +60,77 @@ test('tuning page keeps names and controls without technical metadata', () => {
   }
 });
 
-test('dyno goal selector exposes all supported goals', () => {
+test('dyno goal slider has three steps and invalidates proposals', () => {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  const goals: [DynoGoal, string][] = [
-    ['quarter', 'Quickest quarter mile'], ['accel60', 'Quickest 0–60 mph'],
-    ['accel', 'Quickest 0–100 mph'], ['top', 'Highest top speed'],
-    ['power', 'Maximum horsepower'], ['torque', 'Maximum torque'],
-  ];
-  for (const [value, label] of goals) assert.ok(html.includes(`<option value="${value}">${label}</option>`));
+  assert.ok(html.includes('type="range" min="0" max="2" step="1" ng-model="tuning.dyno.goal" ng-change="setGoal()"'));
+  assert.ok(html.includes("['Acceleration', 'Balanced', 'Top speed'][tuning.dyno.goal]"));
+  assert.ok(!html.includes('<option value="quarter">'));
   assert.ok(html.includes('ng-model="tuning.dyno.optimizeGearing" ng-change="setGoal()"'));
+});
+
+test('multi-pass tuning builds power then refines it without worsening any goal-stage metric', () => {
+  const car = { index: 0, name: 'Multi-pass test', hash: 1, view: new DataView(new ArrayBuffer(0x780)) };
+  const game = { cars: [car], packages: [],
+    tuning: [{ item: 48, level: 1, param: 23, type: 1, f8: -0.06, fC: 0.03 }] };
+  const installed = new Array<boolean>(68).fill(false);
+  installed[48] = true;
+  class PassModel extends DynoModel {
+    override evaluate(setup: ArrayLike<number>): DynoResult {
+      const b = setup[ECU_OFF], time = b >= 160 ? 1 : 10;
+      return { t60: time, t100: 2 * time, quarterMile: 3 * time, quarterExact: 3 * time,
+        topSpeed: 100 / time, trapSpeed: 80 / time,
+        peakPower: b === 40 ? 1000 : b === 180 ? 950 : 800, peakPowerRpm: 6000,
+        peakTorque: 1000, peakTorqueRpm: 4000 };
+    }
+  }
+  const model = new PassModel(game, car, installed, new Array<number>(9).fill(0));
+  const setup = new Uint8Array(SETUP_SIZE).fill(100);
+  const original = setup.slice();
+  for (const preference of [0, 1, 2] as const) {
+    const result = optimizeDynoSetup(model, setup, preference);
+    assert.equal(result.stages.power.peakPower, 1000);
+    assert.equal(result.stages.goal.t60, 1);
+    assert.equal(result.stages.goal.peakPower, 800);
+    assert.equal(result.after.peakPower, 950);
+    assert.equal(result.setup[ECU_OFF], 180);
+    for (const metric of ['t60', 't100', 'quarterMile', 'quarterExact'] as const) {
+      assert.ok(result.after[metric] <= result.stages.goal[metric]);
+    }
+    for (const metric of ['topSpeed', 'trapSpeed'] as const) assert.ok(result.after[metric] >= result.stages.goal[metric]);
+    assert.deepEqual(result.before, model.evaluate(setup));
+    assert.deepEqual(result.after, model.evaluate(result.setup));
+    assert.deepEqual(diffOffsets(setup, result.setup), [ECU_OFF]);
+    assert.deepEqual(setup, original);
+  }
+  class TradeoffModel extends PassModel {
+    override evaluate(setup: ArrayLike<number>): DynoResult {
+      const b = setup[ECU_OFF];
+      const time = 1 + (b - 20) ** 2 / 10000;
+      return { ...super.evaluate(setup), t60: time, t100: 2 * time, quarterMile: 3 * time,
+        quarterExact: 3 * time, topSpeed: 100 - (b - 180) ** 2 / 1000, peakPower: 800, trapSpeed: 80 };
+    }
+  }
+  const tradeoff = new TradeoffModel(game, car, installed, new Array<number>(9).fill(0));
+  const results = ([0, 1, 2] as const).map((preference) => optimizeDynoSetup(tradeoff, setup, preference));
+  assert.ok(results[0].after.t60 < results[1].after.t60);
+  assert.ok(results[1].after.t60 < results[2].after.t60);
+  assert.ok(results[0].after.topSpeed < results[1].after.topSpeed);
+  assert.ok(results[1].after.topSpeed < results[2].after.topSpeed);
+  for (const metric of ['t60', 't100', 'quarterMile', 'quarterExact', 'topSpeed', 'trapSpeed'] as const) {
+    class RegressionModel extends PassModel {
+      override evaluate(setup: ArrayLike<number>): DynoResult {
+        const result = super.evaluate(setup);
+        if (setup[ECU_OFF] === 180) {
+          result[metric] += metric === 'topSpeed' || metric === 'trapSpeed' ? -1e-6 : 1e-6;
+        }
+        return result;
+      }
+    }
+    const guarded = new RegressionModel(game, car, installed, new Array<number>(9).fill(0));
+    const result = optimizeDynoSetup(guarded, setup);
+    assert.equal(result.after.peakPower, result.stages.goal.peakPower, `${metric}: reject even a small regression`);
+    assert.deepEqual(result.after, result.stages.goal);
+  }
 });
 
 /** Byte offsets that differ between two buffers of equal length. */
@@ -881,6 +943,85 @@ test('game data: dyno matches the traced reference model on the fixture', { skip
   });
 });
 
+test('shift power windows integrate every RPM recovery band in five and six speed gearboxes', () => {
+  for (const count of [5, 6]) {
+    const view = new DataView(new ArrayBuffer(0x780));
+    view.setInt32(0x1c8, count, true);
+    view.setFloat32(0x1f0, 1000, true);
+    view.setFloat32(0x1f4, 6000, true);
+    view.setFloat32(0x1f8, 7000, true);
+    for (let i = 0; i < count; i++) view.setFloat32(0x1d8 + i * 4, 4 * 0.75 ** i, true);
+    for (let i = 0; i < 9; i++) view.setFloat32(0x200 + i * 4, 0.3, true);
+    const car = { index: 0, name: 'Power window test', hash: 1, view };
+    const model = new DynoModel({ cars: [car], packages: [], tuning: [] }, car,
+      new Array<boolean>(68).fill(false), new Array<number>(9).fill(0));
+    const setup = new Uint8Array(SETUP_SIZE).fill(100);
+    const original = setup.slice();
+    const windows = model.gearPowerWindows(setup);
+    assert.equal(windows.length, count - 1);
+    for (const [i, window] of windows.entries()) {
+      assert.equal(window.fromGear, i + 1);
+      assert.equal(window.retention, 0.75);
+      assert.equal(window.shiftRpm, 5800);
+      assert.equal(window.landingRpm, 4350);
+      // Constant torque gives power linear in RPM; the game's peak sampler stops at 6950.
+      assert.ok(Math.abs(window.powerCoverage - 5075 / 6950) < 1e-9);
+    }
+    assert.deepEqual(setup, original);
+  }
+});
+
+test('gearing optimization repairs a second-to-third hole even when the timed goal prefers it', () => {
+  const view = new DataView(new ArrayBuffer(0x780));
+  view.setInt32(0x1c8, 5, true);
+  for (const [off, value] of [[0x1b8, 4], [0x1bc, 4], [0x3d8, 4], [0x50, 0.3], [0x80, 0.3],
+    [0x1f0, 1000], [0x1f4, 6000], [0x1f8, 7000]]) view.setFloat32(off, value, true);
+  [3.5, 2.1, 1.5, 1.1, 0.85].forEach((value, i) => view.setFloat32(0x1d8 + i * 4, value, true));
+  for (let i = 0; i < 9; i++) view.setFloat32(0x200 + i * 4, 0.3, true);
+  const car = { index: 0, name: 'Shift hole test', hash: 1, view };
+  const tuning = [[-0.2, 0.4], [-0.8, 1], [-0.6, 0.8], [-0.4, 0.6], [-0.3, 0.4], [-0.1, 0.25]]
+    .map(([f8, fC], i) => ({ item: 11, level: 3, param: 9 + i, type: 1, f8, fC }));
+  const installed = new Array<boolean>(68).fill(false);
+  installed[11] = true;
+  class ShortRunModel extends DynoModel {
+    override evaluate(setup: ArrayLike<number>): DynoResult {
+      return { t60: 1 + (200 - setup[11] + setup[12]) * 0.0001, t100: 2, quarterMile: 3,
+        quarterExact: 3, topSpeed: 100, trapSpeed: 80, peakTorque: 300, peakTorqueRpm: 5000,
+        peakPower: 200, peakPowerRpm: 6000 };
+    }
+  }
+  const model = new ShortRunModel({ cars: [car], packages: [], tuning }, car, installed,
+    new Array<number>(9).fill(0));
+  const neutral = new Uint8Array(SETUP_SIZE).fill(100);
+  const bad = neutral.slice();
+  bad[11] = 200;
+  bad[12] = 0;
+  const original = bad.slice();
+  const before = model.gearPowerWindows(bad);
+  const reference = model.gearPowerWindows(neutral);
+  const result = optimizeSetup(model, bad, 'accel60', true);
+  const after = model.gearPowerWindows(result.setup);
+  const even = reference.reduce((product, window) => product * window.retention, 1) ** (1 / reference.length);
+  assert.ok(before[1].retention < Math.min(reference[1].retention, even) - 0.1);
+  assert.ok(after[1].retention > before[1].retention + 0.1);
+  assert.ok(Math.min(...after.map((window) => window.powerCoverage)) >
+    Math.min(...before.map((window) => window.powerCoverage)));
+  for (const [i, window] of after.entries()) {
+    assert.ok(window.retention >= Math.min(reference[i].retention, even) - 1e-6);
+  }
+  assert.ok(diffOffsets(bad, result.setup).every((idx) => model.gearingParameters.includes(idx)));
+  assert.deepEqual(bad, original);
+  assert.deepEqual(result.after, model.evaluate(result.setup));
+  assert.deepEqual(optimizeSetup(model, bad, 'accel60', false).setup, bad);
+  class NoBudgetModel extends ShortRunModel {
+    override evaluate(setup: ArrayLike<number>): DynoResult {
+      return { ...super.evaluate(setup), t60: setup[11] === 200 && setup[12] === 0 ? 1 : 2 };
+    }
+  }
+  const noBudget = new NoBudgetModel(model.game, car, installed, new Array<number>(9).fill(0));
+  assert.throws(() => optimizeSetup(noBudget, bad, 'accel60', true), /No smooth gearing setup.*5%/);
+});
+
 test('game data: auto-tune improves the quarter mile and only changes curve bytes', { skip: SKIP_NO_GAME }, () => {
   const game = parseGameData(new Uint8Array(readFileSync(GAME_BUN)));
   const sd = readSlotDyno(load(), 0);
@@ -911,14 +1052,25 @@ test('game data: new goals improve fixture acceleration and peak figures without
   }
 });
 
-test('game data: optional gearing improves the quarter mile and respects installed tuning unlocks', { skip: SKIP_NO_GAME }, () => {
+test('game data: optional gearing balances all-shift power with performance and respects tuning unlocks', { skip: SKIP_NO_GAME }, () => {
   const game = parseGameData(new Uint8Array(readFileSync(GAME_BUN)));
   const sd = readSlotDyno(load(), 0);
   const model = new DynoModel(game, findCar(game, sd.hash)!, sd.installed, sd.uniques);
   assert.deepEqual(model.gearingParameters, [9, 10, 11, 12, 13, 14, 15]);
   const curves = optimizeSetup(model, sd.setups[1], 'quarter');
   const result = optimizeSetup(model, curves.setup, 'quarter', true);
-  assert.ok(result.after.quarterExact < curves.after.quarterExact);
+  const beforeWindows = model.gearPowerWindows(curves.setup);
+  const afterWindows = model.gearPowerWindows(result.setup);
+  assert.ok(Math.min(...afterWindows.map((window) => window.powerCoverage)) >
+    Math.min(...beforeWindows.map((window) => window.powerCoverage)) + 0.1);
+  const dispersion = (windows: ReturnType<DynoModel['gearPowerWindows']>) => {
+    const gaps = windows.map((window) => -Math.log(window.retention));
+    const mean = gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length;
+    return gaps.reduce((sum, gap) => sum + (gap - mean) ** 2, 0) / gaps.length / mean ** 2;
+  };
+  assert.ok(dispersion(afterWindows) < dispersion(beforeWindows) * 0.5);
+  const goalScore = (r: DynoResult) => r.quarterExact * 1000 + r.t100 - r.topSpeed * 1e-3;
+  assert.ok(goalScore(result.after) <= goalScore(curves.after) * 1.05 + 1e-9);
   assert.ok(diffOffsets(curves.setup, result.setup).some((i) => i >= 9 && i <= 15));
   const allowed = new Set([...model.gearingParameters, ...Array.from({ length: 18 }, (_, i) => ECU_OFF + i)]);
   assert.ok(diffOffsets(curves.setup, result.setup).every((i) => allowed.has(i)));
@@ -943,6 +1095,47 @@ test('game data: optional gearing improves the quarter mile and respects install
   assert.ok(!suvModel.gearingParameters.includes(15));
   const suvResult = optimizeSetup(suvModel, suv.setups[1], 'quarter', true);
   assert.equal(suvResult.setup[15], suv.setups[1][15]);
+  for (let slot = 1; slot < 4; slot++) {
+    const sd = readSlotDyno(load(), slot);
+    const other = new DynoModel(game, findCar(game, sd.hash)!, sd.installed, sd.uniques);
+    const optimized = slot === 2 ? suvResult : optimizeSetup(other, sd.setups[1], 'quarter', true);
+    const neutral = sd.setups[1].slice();
+    for (const idx of other.gearingParameters) neutral[idx] = 100;
+    const windows = other.gearPowerWindows(optimized.setup);
+    const reference = other.gearPowerWindows(neutral);
+    const even = reference.reduce((product, window) => product * window.retention, 1) ** (1 / reference.length);
+    assert.equal(windows.length, other.base.gearCount - 1);
+    for (const [i, window] of windows.entries()) {
+      assert.ok(window.retention >= Math.min(reference[i].retention, even) - 1e-6, `${other.car.name}, shift ${i + 1}`);
+    }
+    assert.ok(dispersion(windows) < dispersion(reference), `${other.car.name}: more even RPM drops`);
+    assert.ok(goalScore(optimized.after) <= goalScore(optimized.before) * 1.05 + 1e-9, `${other.car.name}: performance budget`);
+  }
+});
+
+test('game data: staged tuning protects final times and speeds for all slider goals', { skip: SKIP_NO_GAME }, () => {
+  const game = parseGameData(new Uint8Array(readFileSync(GAME_BUN)));
+  for (const slot of [0, 2]) {
+    const sd = readSlotDyno(load(), slot);
+    const model = new DynoModel(game, findCar(game, sd.hash)!, sd.installed, sd.uniques);
+    const original = sd.setups[1].slice();
+    for (const preference of [0, 1, 2] as const) {
+      const result = optimizeDynoSetup(model, sd.setups[1], preference, true);
+      assert.ok(result.stages.power.peakPower >= result.before.peakPower);
+      assert.ok(result.after.peakPower >= result.stages.goal.peakPower);
+      for (const metric of ['t60', 't100', 'quarterMile', 'quarterExact'] as const) {
+        assert.ok(Number.isFinite(result.after[metric]));
+        assert.ok(result.after[metric] <= result.stages.goal[metric], `${model.car.name}/${preference}/${metric}`);
+      }
+      for (const metric of ['topSpeed', 'trapSpeed'] as const) {
+        assert.ok(result.after[metric] >= result.stages.goal[metric], `${model.car.name}/${preference}/${metric}`);
+      }
+      const allowed = new Set([...model.gearingParameters, ...Array.from({ length: 18 }, (_, i) => ECU_OFF + i)]);
+      assert.ok(diffOffsets(original, result.setup).every((idx) => allowed.has(idx)));
+      assert.deepEqual(sd.setups[1], original);
+      assert.deepEqual(result.after, model.evaluate(result.setup));
+    }
+  }
 });
 
 test('controller applies optional gearing and clears proposals when the option changes', { skip: SKIP_NO_GAME }, async (t) => {
@@ -995,7 +1188,8 @@ test('controller applies optional gearing and clears proposals when the option c
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(scope.tuning.dyno.busy, false);
     assert.equal(scope.tuning.dyno.hasProposal, true);
-    const expected = optimizeSetup(model, sd.setups[1], 'quarter', gearing).setup;
+    assert.equal(scope.tuning.dyno.goal, 1);
+    const expected = optimizeDynoSetup(model, sd.setups[1], 1, gearing).setup;
     scope.applyDyno();
     scope.download();
     const output = new Uint8Array(await downloads[downloads.length - 1].arrayBuffer());
@@ -1006,6 +1200,14 @@ test('controller applies optional gearing and clears proposals when the option c
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(scope.tuning.dyno.hasProposal, true);
   scope.tuning.dyno.optimizeGearing = false;
+  scope.setGoal();
+  assert.equal(scope.tuning.dyno.hasProposal, false);
+  scope.tuning.dyno.goal = 2;
+  scope.setGoal();
+  scope.optimizeDyno();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(scope.tuning.dyno.hasProposal, true);
+  scope.tuning.dyno.goal = 0;
   scope.setGoal();
   assert.equal(scope.tuning.dyno.hasProposal, false);
 });

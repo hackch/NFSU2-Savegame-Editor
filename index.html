@@ -171,25 +171,25 @@
           </div>
           <div class="dyno-controls">
             <strong>{{ tuning.dyno.carName }}</strong>
-            <label>
-              Goal
-              <select ng-model="tuning.dyno.goal" ng-change="setGoal()">
-                <option value="quarter">Quickest quarter mile</option>
-                <option value="accel60">Quickest 0–60 mph</option>
-                <option value="accel">Quickest 0–100 mph</option>
-                <option value="top">Highest top speed</option>
-                <option value="power">Maximum horsepower</option>
-                <option value="torque">Maximum torque</option>
-              </select>
-            </label>
+            <div class="dyno-goal">
+              <label for="dyno-goal">Goal: {{ ['Acceleration', 'Balanced', 'Top speed'][tuning.dyno.goal] }}</label>
+              <input id="dyno-goal" type="range" min="0" max="2" step="1" ng-model="tuning.dyno.goal" ng-change="setGoal()"
+                     ng-disabled="tuning.dyno.busy" aria-label="Tuning goal"
+                     aria-valuetext="{{ ['Acceleration', 'Balanced', 'Top speed'][tuning.dyno.goal] }}">
+              <div class="dyno-goal-labels" aria-hidden="true"><span>Acceleration</span><span>Balanced</span><span>Top speed</span></div>
+            </div>
             <label class="dyno-gearing">
               <input type="checkbox" ng-model="tuning.dyno.optimizeGearing" ng-change="setGoal()" ng-disabled="tuning.dyno.busy">
-              Optimize gearing
+              Optimize gearing &amp; shift spacing
             </label>
             <button type="button" class="profile-action-btn" ng-click="optimizeDyno()" ng-disabled="tuning.dyno.busy">
               {{ tuning.dyno.busy ? 'Tuning…' : (tuning.dyno.optimizeGearing ? 'Auto-tune ECU, turbo &amp; gearing' : 'Auto-tune ECU &amp; turbo') }}
             </button>
           </div>
+          <p class="muted">Power first, then two goal-tuning passes, then more power only if no times or speeds get worse.</p>
+          <p class="muted" ng-if="tuning.dyno.optimizeGearing">
+            Balances every shift's power band and RPM spacing with your selected goal.
+          </p>
           <table class="dyno-table">
             <thead>
               <tr><th></th><th>Current</th><th ng-if="tuning.dyno.hasProposal">Auto-tuned</th></tr>
@@ -210,7 +210,7 @@
           </table>
           <div class="bike-actions" ng-if="tuning.dyno.hasProposal">
             <button type="button" class="profile-action-btn" ng-click="applyDyno()">Apply to {{ tuning.dyno.setupNames[tuning.dyno.setup] }} setup</button>
-            <span class="muted">Only the ECU and turbo curves change.</span>
+            <span class="muted">{{ tuning.dyno.optimizeGearing ? 'ECU, turbo and eligible gearing settings change.' : 'Only the ECU and turbo curves change.' }}</span>
           </div>
         </div>
       </div>

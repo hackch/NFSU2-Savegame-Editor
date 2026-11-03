@@ -113,6 +113,9 @@
 .dyno-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 10px; }
 .dyno-controls label { display: flex; align-items: center; gap: 6px; margin: 0; }
 .dyno-gearing input { width: 16px; height: 16px; accent-color: var(--color-primary); }
+.dyno-goal { width: 280px; max-width: 100%; }
+.dyno-goal input { width: 100%; accent-color: var(--color-primary); }
+.dyno-goal-labels { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--color-text-muted); }
 .dyno-controls strong { margin-right: auto; color: var(--color-text-strong); letter-spacing: .04em; }
 
 .dyno-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; font-variant-numeric: tabular-nums; }
