@@ -7,6 +7,7 @@ import {
   SLOT_LINK_OFF, SLOT_LINK_LEN, SLOT_LOCK_REL, SLOT_BOUGHT_REL, GARAGE_CAR_COUNT, GARAGE_CAR_MAX, PERF_OFF,
 } from './layout.js';
 import { PERF_COUNT } from './perf.js';
+import { TRAFFIC_CARS } from '../data/traffic-cars.js';
 
 /**
  * Whether a slot holds a car, from its used header.
@@ -32,6 +33,18 @@ export function getCarKey(data: Uint8Array, slot: number): string {
 /** Car type hash used by the game physics tables and slot-name identification. */
 export function getCarTypeHash(data: Uint8Array, slot: number): number {
   return dataView(data).getUint32(slotBase(slot) + CAR_TYPE_HASH_REL, true);
+}
+
+/** Experimental identity-only edit; traffic body/customization data is not mapped. */
+export function setSlotTrafficCar(data: Uint8Array, slot: number, hash: number): Uint8Array {
+  const base = slotBase(slot);
+  if (!TRAFFIC_CARS.some((car) => car.hash === hash)) throw new RangeError('Unknown traffic vehicle.');
+  if (slotState(data, slot) !== 'filled' || !isSlotUsed(data, slot)) {
+    throw new RangeError('Traffic experiments require an unlocked, filled car slot.');
+  }
+  const out = data.slice();
+  dataView(out).setUint32(base + CAR_TYPE_HASH_REL, hash, true);
+  return out;
 }
 
 /**

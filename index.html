@@ -67,7 +67,7 @@
           </div>
           <p class="muted" ng-if="slot.state === 'locked'">Locked. Its car is hidden until the slot is unlocked.</p>
           <p class="slot-car-name" ng-if="slot.state === 'filled'">
-            {{ slot.car ? slot.car.name : 'Unknown car' }}
+            {{ slot.trafficName ? slot.trafficName + ' (experimental traffic)' : (slot.car ? slot.car.name : 'Unknown car') }}
           </p>
           <p class="slot-car-name muted" ng-if="slot.state === 'open'">Open for a sponsor car</p>
           <div class="bike-actions">
@@ -76,7 +76,7 @@
             <button type="button" class="profile-action-btn" ng-if="slot.state === 'filled'" ng-click="toggleUnlocks(slot.index)">{{ slot.unlocked === unlockTotal ? 'Lock parts' : 'Unlock parts' }}</button>
           </div>
           <div class="bike-actions slot-operation">
-            <select ng-model="replaceTarget[slot.index]" ng-options="d.id as d.name for d in donors" ng-disabled="!donors.length || slot.locked">
+            <select ng-model="replaceTarget[slot.index]" ng-options="car.id as car.name group by car.group disable when car.experimental && (slot.state !== 'filled' || !slot.used) for car in replacementCars" ng-disabled="!donors.length || slot.locked">
               <option value="">{{ slot.used ? 'Replace car with…' : 'Add car…' }}</option>
             </select>
             <button type="button" class="profile-action-btn" ng-disabled="slot.locked || replaceTarget[slot.index] === undefined || replaceTarget[slot.index] === ''"

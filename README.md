@@ -81,6 +81,10 @@ Then open `http://127.0.0.1:8765/index.html`.
 - **Optimize gearing** is unchecked by default. Enable it to include unlocked final-drive and forward-gear settings in time/speed optimization. Apply saves those settings alongside the curves, leaving other setups and unrelated bytes unchanged. Locked and unused gears are preserved. Gearing does not affect engine peak power/torque, so those goals leave it unchanged even when checked. The game's adjacent-gear constraints and byte normalization are included; see [technical.md](technical.md#gearing-trace).
 - Auto-tune goals: quickest quarter mile, 0–60 mph or 0–100 mph; highest top speed; maximum peak horsepower or torque. Power and torque goals maximize the displayed peaks (hp/kW and N·m/lb-ft), not average output across the rpm range.
 
+## Experimental traffic identities
+
+The **Replace car with** dropdown includes a **Traffic cars (experimental)** group with 15 traffic vehicles, enabled only for filled, unlocked slots. This is an **identity-only experiment**, not a complete donor replacement: it changes only the car type hash, preserving existing body, parts and tuning. Appearance, player driving and career loading are unverified. Traffic replacement applies without confirmation. The game may fail to load the edited save; use a backup. Traffic slots are labeled experimental and DYNO is unavailable. Normal car replacement remains available to restore an ordinary car.
+
 ## Tests
 
 ```

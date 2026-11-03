@@ -19,6 +19,7 @@ export interface SlotView {
   state: SlotState;
   key: string;
   car: Donor | null;
+  trafficName: string;
   perfCount: number;
   uniqueCount: number;
   unlocked: number;
@@ -107,6 +108,7 @@ export interface EditorScope extends angular.IScope {
   swapTarget: Record<number, number | string | undefined>;
   replaceTarget: Record<number, number | string | undefined>;
   donors: Donor[];
+  replacementCars: { id: number | string; name: string; group: string; experimental: boolean }[];
   tuning: {
     open: boolean;
     slot: number;

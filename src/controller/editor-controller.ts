@@ -10,6 +10,8 @@ import {
   setPerfFlag, setPerfFlags, setUniquePerfFlag, uniquePerfOffset, UNIQUE_PERF_COUNT,
 } from '../model/perf.js';
 import { countUnlocked, setUnlocks, UNLOCK_COUNT } from '../model/unlocks.js';
+import { TRAFFIC_CARS } from '../data/traffic-cars.js';
+import { setSlotTrafficCar } from '../model/slots.js';
 import {
   DynoModel, findCar, KW_TO_HP, MPH_TO_KMH, NM_TO_LBFT, optimizeSetup, parseGameData, readSlotDyno, setSetupTuning, SETUP_NAMES,
   type DynoResult, type GameData,
@@ -55,6 +57,11 @@ export function EditorController($scope: EditorScope): void {
   $scope.swapTarget = {};
   $scope.replaceTarget = {};
   $scope.donors = [];
+  const trafficChoices = TRAFFIC_CARS.map((car) => ({
+    id: `traffic:${car.hash}`, name: `${car.name} (experimental)`,
+    group: 'Traffic cars (experimental)', experimental: true,
+  }));
+  $scope.replacementCars = trafficChoices;
   $scope.tuning = {
     open: false,
     slot: 0,
@@ -78,6 +85,10 @@ export function EditorController($scope: EditorScope): void {
       $scope.$evalAsync(() => {
         donors = parsed;
         $scope.donors = parsed;
+        $scope.replacementCars = [
+          ...parsed.map((car) => ({ id: car.id, name: car.name, group: 'Cars', experimental: false })),
+          ...trafficChoices,
+        ];
         donorIndex = buildCarIndex(parsed);
         if (data) refresh();
       });
@@ -108,6 +119,7 @@ export function EditorController($scope: EditorScope): void {
         state: slotState(bytes, index),
         key,
         car: identifyCar(donorIndex, getCarTypeHash(bytes, index)),
+        trafficName: TRAFFIC_CARS.find((car) => car.hash === getCarTypeHash(bytes, index))?.name ?? '',
         perfCount: TUNING_PERF_INDICES.filter((i) => getPerfFlag(bytes, index, i)).length,
         uniqueCount: UNIQUE_PERF_PARTS.filter((p) => getUniquePerfValue(bytes, index, p.index) !== 0).length,
         unlocked: countUnlocked(bytes, index),
@@ -159,8 +171,11 @@ export function EditorController($scope: EditorScope): void {
   /** Builds the dyno model of the open tuning slot, or explains why there is none. */
   function dynoModel(): { model: DynoModel; setups: Uint8Array[] } | { reason: string } {
     if (!data) return { reason: 'Load a save first.' };
-    if (!game) return { reason: '' };
     const sd = readSlotDyno(data, $scope.tuning.slot);
+    if (TRAFFIC_CARS.some((car) => car.hash === sd.hash)) {
+      return { reason: 'DYNO is unavailable for experimental traffic vehicles.' };
+    }
+    if (!game) return { reason: '' };
     const car = findCar(game, sd.hash);
     if (!car) return { reason: 'This car is not in the loaded game data.' };
     const model = new DynoModel(game, car, sd.installed, sd.uniques);
@@ -350,6 +365,11 @@ export function EditorController($scope: EditorScope): void {
     if (!data) return;
     const raw = $scope.replaceTarget[slot];
     if (raw === undefined || raw === '') return;
+    const traffic = TRAFFIC_CARS.find((car) => raw === `traffic:${car.hash}`);
+    if (traffic) {
+      replaceTrafficCar(slot, traffic.hash);
+      return;
+    }
     const donor = donors[Number(raw)];
     if (!donor) return;
     const current = $scope.slots[slot].car ? $scope.slots[slot].car?.name : 'an unknown car';
@@ -367,6 +387,23 @@ export function EditorController($scope: EditorScope): void {
       setStatus('error', errorMessage(err));
     }
   };
+
+  function replaceTrafficCar(slot: number, hash: number): void {
+    if (!data) return;
+    const car = TRAFFIC_CARS.find((car) => car.hash === hash);
+    if (!car) {
+      setStatus('error', 'Select a traffic vehicle first.');
+      return;
+    }
+    try {
+      $scope.tuning.open = false;
+      applyResult(setSlotTrafficCar(data, slot, car.hash));
+      $scope.replaceTarget[slot] = '';
+      setStatus('success', `Experimental ${car.name} identity set in slot ${slot + 1}. Conversion is incomplete; test only with a backup.`);
+    } catch (err) {
+      setStatus('error', errorMessage(err));
+    }
+  }
 
   $scope.loadGameData = function (file: File | null): void {
     if (!file) return;

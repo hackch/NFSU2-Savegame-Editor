@@ -7,6 +7,8 @@ import {
   PERF_PARTS, PERF_CATEGORIES, TUNING_PERF_CATEGORIES, TUNING_PERF_INDICES, UNIQUE_PERF_PARTS,
 } from '../data/perf-parts.js';
 import { EditorController } from '../controller/editor-controller.js';
+import { TRAFFIC_CARS } from '../data/traffic-cars.js';
+import { setSlotTrafficCar } from '../model/slots.js';
 import type { EditorScope } from '../controller/editor-scope.js';
 import { UNLOCK_OFFSETS, UNLOCK_CATEGORY_OFFSETS } from '../data/unlock-table.js';
 import {
@@ -560,6 +562,7 @@ test('controller replacement shows Tiburon, Golf and Sentra as distinct cars', {
   scope.loadFile({ name: 'career' } as File);
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(scope.donors.length, donors.length);
+  assert.equal(scope.replacementCars.length, donors.length + TRAFFIC_CARS.length);
   for (const name of ['Hyundai Tiburon GT', 'Volkswagen Golf', 'Nissan Sentra SE-R Spec V', 'Audi TT']) {
     for (let slot = 0; slot < SLOT_COUNT; slot++) {
       if (scope.slots[slot].locked) scope.toggleLock(slot);
@@ -570,6 +573,52 @@ test('controller replacement shows Tiburon, Golf and Sentra as distinct cars', {
       assert.equal(scope.status.type, 'success');
     }
   }
+  for (const car of TRAFFIC_CARS) {
+    const choice = scope.replacementCars.find((option) => option.id === `traffic:${car.hash}`);
+    assert.ok(choice?.experimental);
+    assert.equal(choice.group, 'Traffic cars (experimental)');
+    scope.replaceTarget[0] = choice.id;
+    scope.replaceCar(0);
+    assert.equal(scope.slots[0].trafficName, car.name);
+    assert.equal(scope.slots[0].car, null);
+    assert.equal(scope.status.type, 'success');
+    scope.openTuning(0);
+    assert.match(scope.tuning.dyno.blocked, /unavailable.*traffic/);
+  }
+  replace(globalThis, 'confirm', () => { assert.fail('Traffic replacement must not ask for confirmation.'); });
+  scope.replaceTarget[0] = `traffic:${TRAFFIC_CARS[0].hash}`;
+  scope.replaceCar(0);
+  assert.equal(scope.slots[0].trafficName, TRAFFIC_CARS[0].name);
+  replace(globalThis, 'confirm', () => true);
+  scope.replaceTarget[0] = donorNamed('Hyundai Tiburon GT').id;
+  scope.replaceCar(0);
+  assert.equal(scope.slots[0].trafficName, '');
+  assert.equal(scope.slots[0].car?.name, 'Hyundai Tiburon GT');
+});
+
+test('experimental traffic writes only the identity of filled unlocked slots', () => {
+  const source = new Uint8Array(0xd300);
+  for (let slot = 0; slot < SLOT_COUNT; slot++) {
+    source[SLOT_BASE + slot * SLOT_STRIDE + SLOT_USED_OFF] = 1;
+    source[SLOT_BASE + slot * SLOT_STRIDE + SLOT_BOUGHT_REL] = 1;
+  }
+  assert.equal(TRAFFIC_CARS.length, 15);
+  assert.equal(new Set(TRAFFIC_CARS.map((car) => car.hash)).size, 15);
+  for (const car of TRAFFIC_CARS) {
+    for (let slot = 0; slot < SLOT_COUNT; slot++) {
+      const out = setSlotTrafficCar(source, slot, car.hash);
+      assert.equal(getCarTypeHash(out, slot), car.hash);
+      assert.ok(diffOffsets(source, out).every((off) =>
+        off >= SLOT_BASE + slot * SLOT_STRIDE + 0x14 && off < SLOT_BASE + slot * SLOT_STRIDE + 0x18));
+      assert.equal(getCarTypeHash(source, slot), 0);
+      assert.deepEqual(verifyChecksums(recalculateChecksums(out)), { blockA: true, blockB: true, header: true });
+    }
+  }
+  assert.throws(() => setSlotTrafficCar(source, 0, 0), /Unknown traffic/);
+  assert.throws(() => setSlotTrafficCar(setSlotLocked(source, 0, true), 0, TRAFFIC_CARS[0].hash), /filled/);
+  const open = source.slice();
+  open[SLOT_BASE + SLOT_BOUGHT_REL] = 0;
+  assert.throws(() => setSlotTrafficCar(open, 0, TRAFFIC_CARS[0].hash), /filled/);
 });
 
 test('fixture: car type hashes identify the known cars and the empty slot is unknown', { skip: SKIP_NO_FIXTURE }, () => {
