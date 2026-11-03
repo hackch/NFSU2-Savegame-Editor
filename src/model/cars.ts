@@ -1,4 +1,4 @@
-import { bytesToHex } from './layout.js';
+import { bytesToHex, dataView, CAR_TYPE_HASH_REL } from './layout.js';
 
 /** One slot-relative block of donor car bytes, positioned at its absolute save offset. */
 export interface DonorBlock {
@@ -16,6 +16,8 @@ export interface Donor {
   name: string;
   /** Upper-case hex model key, 8 digits. */
   key: string;
+  /** Car type hash from the first block, distinct from the shared model key. */
+  hash: number;
   /** The three slot blocks, in save order. */
   blocks: DonorBlock[];
 }
@@ -49,36 +51,41 @@ export function parseCarDatabase(raw: Record<string, { off: number; hex: string 
       throw new Error(`Donor "${name}" is missing slot blocks.`);
     }
     const keyBlock = slotBlocks.find((b) => b.off === KEY_BLOCK_OFF) as DonorBlock;
+    const carBlock = slotBlocks.find((b) => b.off === SLOT_BLOCK_OFFSETS[0]) as DonorBlock;
+    if (carBlock.bytes.length < CAR_TYPE_HASH_REL + 4) {
+      throw new Error(`Donor "${name}" is missing its car type hash.`);
+    }
     return {
       id,
       name: name.trim(),
       key: bytesToHex(keyBlock.bytes.subarray(keyBlock.bytes.length - 4)),
+      hash: dataView(carBlock.bytes).getUint32(CAR_TYPE_HASH_REL, true),
       blocks: slotBlocks,
     };
   });
 }
 
 /**
- * Indexes donors by model key. Several donors share a key (base car, sponsor and intro versions);
+ * Indexes donors by car type hash. Variants of the same car (sponsor and intro versions) share a hash;
  * the first one listed wins.
  * @param donors Donor list.
- * @returns Map from upper-case key to donor. The empty key `00000000` is skipped.
+ * @returns Map from car type hash to donor. The empty hash 0 is skipped.
  */
-export function buildCarIndex(donors: Donor[]): Map<string, Donor> {
-  const index = new Map<string, Donor>();
+export function buildCarIndex(donors: Donor[]): Map<number, Donor> {
+  const index = new Map<number, Donor>();
   for (const donor of donors) {
-    if (donor.key === '00000000' || index.has(donor.key)) continue;
-    index.set(donor.key, donor);
+    if (donor.hash === 0 || index.has(donor.hash)) continue;
+    index.set(donor.hash, donor);
   }
   return index;
 }
 
 /**
- * Looks up the donor for a model key.
+ * Looks up the donor for a car type hash.
  * @param index Index from {@link buildCarIndex}.
- * @param key Upper-case hex key.
+ * @param hash Car type hash.
  * @returns The matching donor, or `null` when the key is unknown.
  */
-export function identifyCar(index: Map<string, Donor>, key: string): Donor | null {
-  return index.get(key) ?? null;
+export function identifyCar(index: Map<number, Donor>, hash: number): Donor | null {
+  return index.get(hash) ?? null;
 }

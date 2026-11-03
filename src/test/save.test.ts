@@ -17,7 +17,7 @@ import {
   setPerfFlag, setPerfFlags, setUniquePerfFlag, uniquePerfOffset, PERF_COUNT, UNIQUE_PERF_COUNT,
 } from '../model/perf.js';
 import {
-  getCarKey, isCarBought, isSlotUsed, isSlotLinked, isSlotLocked, setSlotCar, setSlotLocked, slotState, swapSlots,
+  getCarKey, getCarTypeHash, isCarBought, isSlotUsed, isSlotLinked, isSlotLocked, setSlotCar, setSlotLocked, slotState, swapSlots,
 } from '../model/slots.js';
 import { countUnlocked, countUnlockedCategory, setUnlocks, setUnlockCategory, UNLOCK_COUNT } from '../model/unlocks.js';
 import {
@@ -25,6 +25,11 @@ import {
   SLOT_LINK_OFF, SLOT_LINK_LEN, SLOT_LOCK_REL, SLOT_BOUGHT_REL, UNIQUE_PERF_OFF,
 } from '../model/layout.js';
 import { parseCarDatabase, buildCarIndex, identifyCar, type Donor } from '../model/cars.js';
+import {
+  DynoModel, ECU_OFF, MAX_TUNE_BYTE, SETUP_SIZE, TUNING_OFF, findCar, optimizeSetup, parseGameData, readSlotDyno,
+  setSetupCurves, setSetupTuning, setupOffset,
+  type DynoGoal, type DynoResult,
+} from '../model/dyno.js';
 
 const FIXTURE = fileURLToPath(new URL('../../testfile/treav0r', import.meta.url));
 const hasFixture = existsSync(FIXTURE);
@@ -36,7 +41,7 @@ test('built page includes its version, numeric UTC build stamp and splash label'
   const { version } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
   assert.ok(html.includes(`v${version} &middot; Build `));
   assert.match(html, /Build \d{14}<\/span>/);
-  assert.ok(html.includes('Now with unique performance parts!'));
+  assert.ok(html.includes('Now with DYNO!'));
   assert.ok(!html.includes('__APP_VERSION__'));
   assert.ok(!html.includes('__BUILD_NUMBER__'));
 });
@@ -51,6 +56,17 @@ test('tuning page keeps names and controls without technical metadata', () => {
     'part.offset', 'part.index }}', 'cat.unique.offset', 'cat.unique.hexValue', 'uint32 LE:']) {
     assert.ok(!html.includes(metadata), `Page should not display ${metadata}`);
   }
+});
+
+test('dyno goal selector exposes all supported goals', () => {
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const goals: [DynoGoal, string][] = [
+    ['quarter', 'Quickest quarter mile'], ['accel60', 'Quickest 0–60 mph'],
+    ['accel', 'Quickest 0–100 mph'], ['top', 'Highest top speed'],
+    ['power', 'Maximum horsepower'], ['torque', 'Maximum torque'],
+  ];
+  for (const [value, label] of goals) assert.ok(html.includes(`<option value="${value}">${label}</option>`));
+  assert.ok(html.includes('ng-model="tuning.dyno.optimizeGearing" ng-change="setGoal()"'));
 });
 
 /** Byte offsets that differ between two buffers of equal length. */
@@ -235,12 +251,11 @@ test('controller tuning and bulk controls exclude visual-related flags in every 
 
   const downloads: Blob[] = [];
   const confirmations: string[] = [];
-  let acceptConfirmation = true;
   replaceProperty(globalThis, 'FileReader', TestFileReader);
   replaceProperty(globalThis, 'fetch', () => Promise.resolve({ ok: true, json: async () => ({}) }));
   replaceProperty(globalThis, 'confirm', (message: string) => {
     confirmations.push(message);
-    return acceptConfirmation;
+    return true;
   });
   replaceProperty(globalThis, 'document', {
     createElement: () => ({ click() {}, remove() {} }),
@@ -279,22 +294,6 @@ test('controller tuning and bulk controls exclude visual-related flags in every 
   scope.togglePart(hiddenPart);
   assert.equal(scope.status.type, 'error');
   assert.deepEqual(payloadDiff(baseline, await snapshot()), []);
-  scope.setCategory({ ...firstCategory, code: 'AE', parts: [hiddenPart] }, false);
-  assert.equal(scope.status.type, 'error');
-  assert.deepEqual(payloadDiff(baseline, await snapshot()), []);
-
-  const forgedCategory = { ...firstCategory, parts: [hiddenPart] };
-  scope.setCategory(forgedCategory, true);
-  const categoryOn = await snapshot();
-  const categoryOffsets = firstCategory.parts.filter((part) => part.active).map((part) => perfOffset(0, part.index));
-  assert.deepEqual(payloadDiff(baseline, categoryOn), categoryOffsets);
-  scope.setCategory(forgedCategory, false);
-  assert.deepEqual(payloadDiff(baseline, await snapshot()), []);
-
-  acceptConfirmation = false;
-  scope.installAll(0, true);
-  assert.deepEqual(payloadDiff(baseline, await snapshot()), []);
-  acceptConfirmation = true;
 
   for (let slot = 0; slot < SLOT_COUNT; slot++) {
     scope.openTuning(slot);
@@ -303,20 +302,25 @@ test('controller tuning and bulk controls exclude visual-related flags in every 
     assert.equal(scope.tuning.categories.flatMap((category) => category.parts).length, 56);
     assert.equal(scope.tuning.categories.filter((category) => category.unique !== null).length, 9);
     const before = await snapshot();
-    const expected = TUNING_PERF_INDICES.map((index) => perfOffset(slot, index));
-    scope.installAll(slot, true);
+    const perfBytes = TUNING_PERF_INDICES.map((index) => perfOffset(slot, index));
+    const uniqueBytes = UNIQUE_PERF_PARTS.flatMap((part) => {
+      const start = uniquePerfOffset(slot, part.index);
+      return [start, start + 1, start + 2, start + 3];
+    });
+    scope.maxOut(slot);
     assert.equal(scope.slots[slot].perfCount, 54);
-    const enabled = await snapshot();
-    assert.deepEqual(payloadDiff(before, enabled), expected);
-    scope.installAll(slot, false);
-    assert.equal(scope.slots[slot].perfCount, 0);
-    const cleared = await snapshot();
-    assert.deepEqual(payloadDiff(enabled, cleared), expected);
-    assert.deepEqual(payloadDiff(baseline, cleared), []);
+    assert.equal(scope.slots[slot].uniqueCount, UNIQUE_PERF_PARTS.length);
+    const after = await snapshot();
+    const allowed = new Set([...perfBytes, ...uniqueBytes]);
+    assert.deepEqual(payloadDiff(before, after).filter((offset) => !allowed.has(offset)), []);
+    for (const offset of perfBytes) assert.equal(after[offset], 1);
+    for (const part of UNIQUE_PERF_PARTS) {
+      assert.equal(new DataView(after.buffer).getUint32(uniquePerfOffset(slot, part.index), true), 1);
+    }
   }
-  assert.ok(confirmations.some((message) => message.includes('54 active performance part flags')
-    && message.includes('Superseded parts')));
+  assert.deepEqual(confirmations, []);
 });
+
 
 test('invalid tuning addresses and truncated unique/ownership reads throw', () => {
   const data = new Uint8Array(0xd6b6);
@@ -498,17 +502,84 @@ test('every donor has three slot blocks whose key matches its key block tail', (
     assert.deepEqual(donor.blocks.map((b) => b.off), [0x5870, 0x5950, 0x5b20]);
     const tail = donor.blocks[2].bytes.slice(-4);
     assert.equal(donor.key, Array.from(tail, (b) => b.toString(16).padStart(2, '0')).join('').toUpperCase());
+    const block = donor.blocks[0].bytes;
+    assert.equal(donor.hash, new DataView(block.buffer, block.byteOffset, block.byteLength).getUint32(0x14, true));
   }
 });
 
-test('fixture: model keys identify the known cars and the empty slot is unknown', { skip: SKIP_NO_FIXTURE }, () => {
+test('every donor replacement identifies its car type in every slot, including shared-key cars', () => {
+  const source = new Uint8Array(0xd300);
+  source[SLOT_BASE + SLOT_USED_OFF] = 1;
+  for (const donor of donors) {
+    const canonical = donors.find((d) => d.hash === donor.hash);
+    assert.ok(canonical);
+    for (let slot = 0; slot < SLOT_COUNT; slot++) {
+      const out = setSlotCar(source, slot, donor);
+      assert.equal(getCarTypeHash(out, slot), donor.hash);
+      assert.equal(identifyCar(carIndex, getCarTypeHash(out, slot))?.name, canonical.name);
+      assert.equal(readSlotDyno(out, slot).hash, donor.hash);
+      assert.equal(slotState(out, slot), 'filled');
+    }
+  }
+  const collision = ['Nissan Sentra SE-R Spec V', 'Volkswagen Golf', 'Hyundai Tiburon GT'].map(donorNamed);
+  assert.equal(new Set(collision.map((d) => d.key)).size, 1);
+  assert.equal(new Set(collision.map((d) => d.hash)).size, 3);
+  for (const donor of collision) assert.equal(identifyCar(carIndex, donor.hash)?.name, donor.name);
+  assert.equal(identifyCar(carIndex, donorNamed("Audi TT 'Scott'").hash)?.name, 'Audi TT');
+  assert.equal(identifyCar(carIndex, donorNamed("Ford Mustang GT 'Nikki'").hash)?.name, 'Ford Mustang GT');
+  assert.equal(identifyCar(carIndex, 0), null);
+  assert.equal(identifyCar(carIndex, 0xffffffff), null);
+  const padded = new Uint8Array(source.length + 11);
+  padded.set(setSlotCar(source, 2, donorNamed('Hyundai Tiburon GT')), 11);
+  assert.equal(getCarTypeHash(padded.subarray(11), 2), donorNamed('Hyundai Tiburon GT').hash);
+  assert.throws(() => getCarTypeHash(source, 5), RangeError);
+});
+
+test('controller replacement shows Tiburon, Golf and Sentra as distinct cars', { skip: SKIP_NO_FIXTURE }, async (t) => {
+  function replace(target: object, key: PropertyKey, value: unknown): void {
+    const original = Object.getOwnPropertyDescriptor(target, key);
+    Object.defineProperty(target, key, { configurable: true, writable: true, value });
+    t.after(() => {
+      if (original) Object.defineProperty(target, key, original);
+      else Reflect.deleteProperty(target, key);
+    });
+  }
+  class TestFileReader {
+    result = load().buffer;
+    onload: (() => void) | null = null;
+    readAsArrayBuffer(): void { this.onload?.(); }
+  }
+  replace(globalThis, 'FileReader', TestFileReader);
+  replace(globalThis, 'fetch', () => Promise.resolve({ ok: true, json: async () => donorRaw }));
+  replace(globalThis, 'confirm', () => true);
+  const scope = {
+    $apply(callback: () => void) { callback(); },
+    $evalAsync(callback: () => void) { callback(); },
+  } as EditorScope;
+  EditorController(scope);
+  scope.loadFile({ name: 'career' } as File);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(scope.donors.length, donors.length);
+  for (const name of ['Hyundai Tiburon GT', 'Volkswagen Golf', 'Nissan Sentra SE-R Spec V', 'Audi TT']) {
+    for (let slot = 0; slot < SLOT_COUNT; slot++) {
+      if (scope.slots[slot].locked) scope.toggleLock(slot);
+      scope.replaceTarget[slot] = donorNamed(name).id;
+      scope.replaceCar(slot);
+      assert.equal(scope.slots[slot].car?.name, name);
+      assert.equal(scope.slots[slot].state, 'filled');
+      assert.equal(scope.status.type, 'success');
+    }
+  }
+});
+
+test('fixture: car type hashes identify the known cars and the empty slot is unknown', { skip: SKIP_NO_FIXTURE }, () => {
   const data = load();
-  assert.equal(identifyCar(carIndex, getCarKey(data, 0))?.name, 'Mazda RX8');
-  assert.equal(identifyCar(carIndex, getCarKey(data, 1))?.name, 'Nissan 240SX');
-  assert.equal(identifyCar(carIndex, getCarKey(data, 2))?.name, 'Cadillac Escalade (SUV)');
-  assert.equal(identifyCar(carIndex, getCarKey(data, 3))?.name, 'Toyota Trueno AE86 (Corolla)');
+  assert.equal(identifyCar(carIndex, getCarTypeHash(data, 0))?.name, 'Mazda RX8');
+  assert.equal(identifyCar(carIndex, getCarTypeHash(data, 1))?.name, 'Nissan 240SX');
+  assert.equal(identifyCar(carIndex, getCarTypeHash(data, 2))?.name, 'Cadillac Escalade (SUV)');
+  assert.equal(identifyCar(carIndex, getCarTypeHash(data, 3))?.name, 'Toyota Trueno AE86 (Corolla)');
   assert.equal(getCarKey(data, 4), '00000000');
-  assert.equal(identifyCar(carIndex, getCarKey(data, 4)), null);
+  assert.equal(identifyCar(carIndex, getCarTypeHash(data, 4)), null);
 });
 
 test('fixture: replacing a used slot changes its car, resets parts to stock and recalculates cleanly', { skip: SKIP_NO_FIXTURE }, () => {
@@ -516,7 +587,7 @@ test('fixture: replacing a used slot changes its car, resets parts to stock and 
   const target = donorNamed('Nissan 350Z');
   const after = recalculateChecksums(setSlotCar(before, 0, target));
   assert.equal(getCarKey(after, 0), target.key);
-  assert.equal(identifyCar(carIndex, getCarKey(after, 0))?.name, 'Nissan 350Z');
+  assert.equal(identifyCar(carIndex, getCarTypeHash(after, 0))?.name, 'Nissan 350Z');
   assert.equal(isSlotUsed(after, 0), true);
   assert.equal(getPerfFlag(after, 0, 15), false);
   for (let i = 0; i < PERF_COUNT; i++) assert.equal(getPerfFlag(after, 0, i), false);
@@ -546,7 +617,7 @@ test('fixture: empty slot 5 becomes a used and linked car, and the garage count 
   const out = setSlotCar(data, 4, donorNamed('Mazda Miata MX5'));
   assert.equal(isSlotUsed(out, 4), true);
   assert.equal(isSlotLinked(out, 4), true);
-  assert.equal(identifyCar(carIndex, getCarKey(out, 4))?.name, 'Mazda Miata MX5');
+  assert.equal(identifyCar(carIndex, getCarTypeHash(out, 4))?.name, 'Mazda Miata MX5');
   assert.equal(out[GARAGE_CAR_COUNT], 5);
   const headerStart = SLOT_BASE + 4 * SLOT_STRIDE + 0x27c;
   assert.deepEqual(out.slice(headerStart, headerStart + 24), data.slice(SLOT_BASE + 0x27c, SLOT_BASE + 0x27c + 24));
@@ -623,4 +694,269 @@ test('fixture: setSlotCar clears only the lock flag of the slot it writes', { sk
   assert.deepEqual([0, 1, 2, 3, 4].map((s) => isSlotLocked(data, s)), [false, false, false, false, true]);
   const out = setSlotCar(data, 4, donorNamed('Toyota Supra'));
   assert.deepEqual([0, 1, 2, 3, 4].map((s) => isSlotLocked(out, s)), [false, false, false, false, false]);
+});
+
+const GAME_BUN = process.env.NFSU2_GLOBALB ?? 'C:/Program Files (x86)/EA GAMES/Need for Speed Underground 2/GLOBAL/GLOBALB.BUN';
+const SKIP_NO_GAME = (!existsSync(GAME_BUN) || !hasFixture) && 'GLOBALB.BUN (set NFSU2_GLOBALB) or testfile/treav0r missing';
+
+test('setSetupCurves writes only the ECU and turbo bytes of one setup', () => {
+  const data = new Uint8Array(0xd300);
+  const setup = new Uint8Array(SETUP_SIZE).fill(7);
+  const out = setSetupCurves(data, 2, 1, setup);
+  const start = setupOffset(2, 1);
+  assert.equal(start, SLOT_BASE + 2 * SLOT_STRIDE + TUNING_OFF + SETUP_SIZE);
+  assert.deepEqual(diffOffsets(data, out), Array.from({ length: SETUP_SIZE - ECU_OFF }, (_, i) => start + ECU_OFF + i));
+  assert.equal(data[start + ECU_OFF], 0);
+  assert.throws(() => setupOffset(0, 5), RangeError);
+  assert.throws(() => setSetupCurves(data, 0, 0, new Uint8Array(40)), RangeError);
+});
+
+test('setSetupTuning optionally writes gearing without touching other setup or save bytes', () => {
+  const data = new Uint8Array(0xd300).fill(13);
+  const setup = new Uint8Array(SETUP_SIZE).fill(100);
+  for (let slot = 0; slot < SLOT_COUNT; slot++) {
+    for (let index = 0; index < 5; index++) {
+      const start = setupOffset(slot, index);
+      const out = setSetupTuning(data, slot, index, setup, true);
+      assert.deepEqual(diffOffsets(data, out), [
+        ...Array.from({ length: 7 }, (_, i) => start + 9 + i),
+        ...Array.from({ length: 18 }, (_, i) => start + ECU_OFF + i),
+      ]);
+      assert.deepEqual(setSetupTuning(data, slot, index, setup), setSetupCurves(data, slot, index, setup));
+      assert.equal(data[start + 9], 13);
+    }
+  }
+  assert.throws(() => setSetupTuning(data, 0, 0, new Uint8Array(40), true), RangeError);
+});
+
+test('parseGameData rejects files without the car tables', () => {
+  assert.throws(() => parseGameData(new Uint8Array(64)), /GLOBALB\.BUN/);
+});
+
+test('new dyno goals optimize their selected metric independently', () => {
+  const car = { index: 0, name: 'Goal test', hash: 1, view: new DataView(new ArrayBuffer(0x780)) };
+  const game = { cars: [car], packages: [],
+    tuning: [{ item: 48, level: 1, param: 23, type: 1, f8: -0.06, fC: 0.03 }] };
+  const installed = new Array<boolean>(68).fill(false);
+  installed[48] = true;
+  class GoalModel extends DynoModel {
+    override evaluate(setup: ArrayLike<number>): DynoResult {
+      const b = setup[ECU_OFF];
+      return {
+        t60: 1 + Math.abs(b - 35), t100: Infinity, quarterMile: Infinity, quarterExact: Infinity,
+        topSpeed: 100, trapSpeed: 0, peakPower: 1000 - Math.abs(b - 145), peakPowerRpm: 6000,
+        peakTorque: 2000 - Math.abs(b - 185), peakTorqueRpm: 4000,
+      };
+    }
+  }
+  const model = new GoalModel(game, car, installed, new Array<number>(9).fill(0));
+  const current = new Uint8Array(SETUP_SIZE).fill(100);
+  const original = current.slice();
+  const goals: [DynoGoal, number][] = [['accel60', 35], ['power', 145], ['torque', 185]];
+  for (const [goal, bestByte] of goals) {
+    const result = optimizeSetup(model, current, goal);
+    assert.equal(result.setup[ECU_OFF], bestByte);
+    assert.deepEqual(result.after, model.evaluate(result.setup));
+    assert.deepEqual(result.before, model.evaluate(current));
+    assert.deepEqual(diffOffsets(current, result.setup), [ECU_OFF]);
+    assert.deepEqual(current, original);
+  }
+});
+
+test('gearing load matches native byte normalization and adjacent-gear propagation', () => {
+  // SPEED2.EXE's load/setter/writer executed with synthetic range and unique hooks.
+  const cases = [
+    { bytes: [100, 100, 100, 100, 100, 100, 100], fd: 4,
+      ratios: [3.5, 2.1, 1.5, 1.1, 0.85], sixth: 0.7 },
+    { bytes: [0, 0, 0, 0, 0, 0, 0], fd: 3.8,
+      ratios: [2.7, 1.5, 1.1, 0.8, 0.75], sixth: 0.7 },
+    { bytes: [200, 200, 200, 200, 200, 200, 200], fd: 4.4,
+      ratios: [4.5, 2.898, 2.1, 1.499, 1.0985], sixth: 0.8 },
+    { bytes: [100, 0, 200, 0, 200, 0, 200], fd: 4,
+      ratios: [2.7, 2.646, 1.55, 1.499, 0.75], sixth: 0.8,
+      sixRatios: [2.7, 2.646, 1.55, 1.499, 0.85, 0.8] },
+  ];
+  for (const count of [5, 6]) {
+    const view = new DataView(new ArrayBuffer(0x780));
+    view.setInt32(0x1c8, count, true);
+    const base = [3.5, 2.1, 1.5, 1.1, 0.85, count === 6 ? 0.7 : 0];
+    for (const [off, value] of [
+      [0x1b8, 4], [0x1bc, 4], [0x3d8, 4], [0x1f4, 6000], [0x50, 0.3], [0x80, 0.3],
+      ...base.map((value, i) => [0x1d8 + i * 4, value]),
+    ]) view.setFloat32(off, value, true);
+    const car = { index: 0, name: 'Synthetic gearbox', hash: 1, view };
+    const tuning = [[-0.2, 0.4], [-0.8, 1], [-0.6, 0.8], [-0.4, 0.6],
+      [-0.3, 0.4], [-0.1, 0.25], [0, 0.1]].map(([f8, fC], i) =>
+      ({ item: 11, level: 3, param: 9 + i, type: 1, f8, fC }));
+    const installed = new Array<boolean>(68).fill(false);
+    installed[11] = true;
+    const game = { cars: [car], packages: [], tuning };
+    const model = new DynoModel(game, car, installed, new Array<number>(9).fill(0));
+    for (const c of cases) {
+      const setup = new Uint8Array(SETUP_SIZE).fill(100);
+      setup.set(c.bytes, 9);
+      const original = setup.slice();
+      const phys = model.tuned(setup);
+      const expected = count === 6 ? c.sixRatios ?? [...c.ratios, c.sixth] : [...c.ratios, 0];
+      expected.forEach((ratio, i) =>
+        assert.ok(Math.abs(phys.f[(0x1d8 >> 2) + i] - ratio) < 1e-6, `${count} gears, ${c.bytes}: gear ${i + 1}`));
+      assert.ok(Math.abs(phys.f[0x1b8 >> 2] - c.fd) < 1e-6);
+      assert.equal(phys.f[0x1b8 >> 2], phys.f[0x1bc >> 2]);
+      assert.deepEqual(setup, original);
+      assert.deepEqual(model.tuned(setup), phys);
+    }
+    installed[11] = false;
+    const stock = new DynoModel(game, car, installed, new Array<number>(9).fill(0));
+    assert.deepEqual(stock.tuned(new Uint8Array(SETUP_SIZE).fill(200)), stock.base);
+  }
+});
+
+test('game data: dyno matches the traced reference model on the fixture', { skip: SKIP_NO_GAME }, () => {
+  const game = parseGameData(new Uint8Array(readFileSync(GAME_BUN)));
+  const data = load();
+  const golden = [
+    { name: 'RX8', t60: 3.3812, t100: 8.021333, qm: 10.666667, trap: 131.85041, top: 213.000015, kw: 354.539061, nm: 366.000034 },
+    { name: '240SX', t60: 3.872, t100: 8.211667, qm: 10.75, trap: 134.959706, top: 219.000015, kw: 374.591718, nm: 453.958934 },
+    { name: 'ESCALADE', t60: 3.996, t100: 11.523, qm: 11.9, trap: 122.587259, top: 210.000015, kw: 416.872766, nm: 686.628708 },
+    { name: 'COROLLA', t60: 2.9568, t100: 7.564, qm: 10.583333, trap: 136.757271, top: 213.000015, kw: 318.757503, nm: 365.708328 },
+  ];
+  golden.forEach((want, slot) => {
+    const sd = readSlotDyno(data, slot);
+    const car = findCar(game, sd.hash);
+    assert.equal(car?.name, want.name);
+    const r = new DynoModel(game, car!, sd.installed, sd.uniques).evaluate(sd.setups[1]);
+    for (const [got, exp] of [[r.t60, want.t60], [r.t100, want.t100], [r.quarterMile, want.qm], [r.trapSpeed, want.trap],
+      [r.topSpeed, want.top], [r.peakPower, want.kw], [r.peakTorque, want.nm]]) {
+      assert.ok(Math.abs(got - exp) < 1e-4, `${want.name}: ${got} vs ${exp}`);
+    }
+  });
+});
+
+test('game data: auto-tune improves the quarter mile and only changes curve bytes', { skip: SKIP_NO_GAME }, () => {
+  const game = parseGameData(new Uint8Array(readFileSync(GAME_BUN)));
+  const sd = readSlotDyno(load(), 0);
+  const model = new DynoModel(game, findCar(game, sd.hash)!, sd.installed, sd.uniques);
+  assert.ok(model.ecuTunable && model.turboTunable);
+  const { setup, before, after } = optimizeSetup(model, sd.setups[1], 'quarter');
+  assert.ok(after.quarterExact < before.quarterExact - 0.1);
+  assert.deepEqual(Array.from(setup.subarray(0, ECU_OFF)), Array.from(sd.setups[1].subarray(0, ECU_OFF)));
+  assert.ok(Array.from(setup).every((b) => b <= MAX_TUNE_BYTE));
+  assert.deepEqual(model.evaluate(setup), after);
+});
+
+test('game data: new goals improve fixture acceleration and peak figures without changing gearing', { skip: SKIP_NO_GAME }, () => {
+  const game = parseGameData(new Uint8Array(readFileSync(GAME_BUN)));
+  const sd = readSlotDyno(load(), 0);
+  const model = new DynoModel(game, findCar(game, sd.hash)!, sd.installed, sd.uniques);
+  const goals: [DynoGoal, (r: DynoResult) => number, boolean][] = [
+    ['accel60', (r) => r.t60, false], ['power', (r) => r.peakPower, true],
+    ['torque', (r) => r.peakTorque, true],
+  ];
+  for (const [goal, metric, higher] of goals) {
+    const { setup, before, after } = optimizeSetup(model, sd.setups[1], goal);
+    assert.ok(Number.isFinite(metric(after)));
+    assert.ok(higher ? metric(after) > metric(before) : metric(after) < metric(before), `${goal} should improve`);
+    assert.deepEqual(setup.subarray(0, ECU_OFF), sd.setups[1].subarray(0, ECU_OFF));
+    assert.ok(Array.from(setup.subarray(ECU_OFF)).every((b) => b <= MAX_TUNE_BYTE));
+    assert.deepEqual(model.evaluate(setup), after);
+  }
+});
+
+test('game data: optional gearing improves the quarter mile and respects installed tuning unlocks', { skip: SKIP_NO_GAME }, () => {
+  const game = parseGameData(new Uint8Array(readFileSync(GAME_BUN)));
+  const sd = readSlotDyno(load(), 0);
+  const model = new DynoModel(game, findCar(game, sd.hash)!, sd.installed, sd.uniques);
+  assert.deepEqual(model.gearingParameters, [9, 10, 11, 12, 13, 14, 15]);
+  const curves = optimizeSetup(model, sd.setups[1], 'quarter');
+  const result = optimizeSetup(model, curves.setup, 'quarter', true);
+  assert.ok(result.after.quarterExact < curves.after.quarterExact);
+  assert.ok(diffOffsets(curves.setup, result.setup).some((i) => i >= 9 && i <= 15));
+  const allowed = new Set([...model.gearingParameters, ...Array.from({ length: 18 }, (_, i) => ECU_OFF + i)]);
+  assert.ok(diffOffsets(curves.setup, result.setup).every((i) => allowed.has(i)));
+  assert.deepEqual(model.evaluate(result.setup), result.after);
+  for (const goal of ['power', 'torque'] as const) {
+    const peak = optimizeSetup(model, sd.setups[1], goal, true);
+    assert.deepEqual(peak.setup.subarray(9, 16), sd.setups[1].subarray(9, 16));
+  }
+  const installed = new Array<boolean>(68).fill(false);
+  installed[8] = true;
+  const fdOnly = new DynoModel(game, model.car, installed, sd.uniques);
+  assert.deepEqual(fdOnly.gearingParameters, [9]);
+  const fd = optimizeSetup(fdOnly, sd.setups[1], 'quarter', true);
+  assert.ok(diffOffsets(sd.setups[1], fd.setup).every((i) => i === 9));
+  installed[8] = false;
+  const stock = new DynoModel(game, model.car, installed, sd.uniques);
+  assert.deepEqual(stock.gearingParameters, []);
+  assert.deepEqual(optimizeSetup(stock, sd.setups[1], 'quarter', true).setup, sd.setups[1]);
+  const suv = readSlotDyno(load(), 2);
+  const suvModel = new DynoModel(game, findCar(game, suv.hash)!, suv.installed, suv.uniques);
+  assert.equal(suvModel.base.gearCount, 5);
+  assert.ok(!suvModel.gearingParameters.includes(15));
+  const suvResult = optimizeSetup(suvModel, suv.setups[1], 'quarter', true);
+  assert.equal(suvResult.setup[15], suv.setups[1][15]);
+});
+
+test('controller applies optional gearing and clears proposals when the option changes', { skip: SKIP_NO_GAME }, async (t) => {
+  const source = load();
+  const bun = new Uint8Array(readFileSync(GAME_BUN));
+  function replace(target: object, key: PropertyKey, value: unknown): void {
+    const original = Object.getOwnPropertyDescriptor(target, key);
+    Object.defineProperty(target, key, { configurable: true, writable: true, value });
+    t.after(() => {
+      if (original) Object.defineProperty(target, key, original);
+      else Reflect.deleteProperty(target, key);
+    });
+  }
+  class TestFileReader {
+    result: ArrayBuffer | null = null;
+    onload: (() => void) | null = null;
+    readAsArrayBuffer(file: File): void {
+      this.result = (file.name === 'game.bun' ? bun : source).slice().buffer;
+      this.onload?.();
+    }
+  }
+  const downloads: Blob[] = [];
+  replace(globalThis, 'FileReader', TestFileReader);
+  replace(globalThis, 'fetch', () => Promise.resolve({ ok: true, json: async () => ({}) }));
+  replace(globalThis, 'document', {
+    createElement: () => ({ click() {}, remove() {} }), body: { appendChild() {} },
+  });
+  replace(URL, 'createObjectURL', (blob: Blob) => { downloads.push(blob); return 'blob:dyno-test'; });
+  replace(URL, 'revokeObjectURL', () => {});
+  const scope = {
+    $apply(callback: () => void) { callback(); },
+    $evalAsync(callback: () => void) { callback(); },
+  } as EditorScope;
+  EditorController(scope);
+  scope.loadFile({ name: 'career' } as File);
+  scope.openTuning(0);
+  scope.loadGameData({ name: 'game.bun' } as File);
+  assert.equal(scope.tuning.dyno.optimizeGearing, false);
+  assert.equal(scope.tuning.dyno.gameError, '');
+  const game = parseGameData(bun);
+  const sd = readSlotDyno(source, 0);
+  const model = new DynoModel(game, findCar(game, sd.hash)!, sd.installed, sd.uniques);
+  for (const gearing of [false, true]) {
+    scope.loadFile({ name: 'career' } as File);
+    scope.tuning.dyno.optimizeGearing = gearing;
+    scope.setGoal();
+    assert.equal(scope.tuning.dyno.hasProposal, false);
+    scope.optimizeDyno();
+    assert.equal(scope.tuning.dyno.busy, true);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(scope.tuning.dyno.busy, false);
+    assert.equal(scope.tuning.dyno.hasProposal, true);
+    const expected = optimizeSetup(model, sd.setups[1], 'quarter', gearing).setup;
+    scope.applyDyno();
+    scope.download();
+    const output = new Uint8Array(await downloads[downloads.length - 1].arrayBuffer());
+    assert.deepEqual(output, recalculateChecksums(setSetupTuning(source, 0, 1, expected, gearing)));
+    assert.equal(scope.tuning.dyno.hasProposal, false);
+  }
+  scope.optimizeDyno();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(scope.tuning.dyno.hasProposal, true);
+  scope.tuning.dyno.optimizeGearing = false;
+  scope.setGoal();
+  assert.equal(scope.tuning.dyno.hasProposal, false);
 });

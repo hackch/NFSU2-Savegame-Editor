@@ -2,6 +2,7 @@ import type { Donor } from '../model/cars.js';
 import type { ChecksumStatus } from '../model/save-file.js';
 import type { SlotState } from '../model/slots.js';
 import type { PerfPart, UniquePerfPart } from '../data/perf-parts.js';
+import type { DynoGoal } from '../model/dyno.js';
 
 /** Result of a donor-list or file-load problem, shown in the status line. */
 export interface Status {
@@ -52,6 +53,39 @@ export interface CategoryView {
   unique: UniquePartView | null;
 }
 
+/** One dyno value in metric and imperial units; `imperial` is empty for unit-free values. */
+export interface DynoCell {
+  metric: string;
+  imperial: string;
+  rpm: string;
+}
+
+/** One row of the dyno result table. */
+export interface DynoRow {
+  label: string;
+  /** Metric equivalent of the label, e.g. `0–97 km/h`. */
+  sub: string;
+  before: DynoCell;
+  after: DynoCell | null;
+  better: boolean;
+}
+
+/** State of the dyno tab. */
+export interface DynoView {
+  gameName: string;
+  gameError: string;
+  setup: number;
+  setupNames: string[];
+  goal: DynoGoal;
+  optimizeGearing: boolean;
+  carName: string;
+  /** Empty when the car can be tuned, else the reason it cannot. */
+  blocked: string;
+  busy: boolean;
+  rows: DynoRow[];
+  hasProposal: boolean;
+}
+
 /** Top-level tuning tab. */
 export interface TuningTab {
   code: string;
@@ -80,6 +114,7 @@ export interface EditorScope extends angular.IScope {
     tab: string;
     sub: string;
     categories: CategoryView[];
+    dyno: DynoView;
   };
 
   loadFile(file: File | null): void;
@@ -95,9 +130,13 @@ export interface EditorScope extends angular.IScope {
   closeTuning(): void;
   togglePart(part: PartView): void;
   toggleUnique(part: UniquePartView): void;
-  setCategory(cat: CategoryView, on: boolean): void;
-  installAll(slot: number, on: boolean): void;
+  maxOut(slot: number): void;
   swapSlots(slot: number): void;
   replaceCar(slot: number): void;
+  loadGameData(file: File | null): void;
+  selectSetup(setup: number): void;
+  setGoal(): void;
+  optimizeDyno(): void;
+  applyDyno(): void;
   download(): void;
 }

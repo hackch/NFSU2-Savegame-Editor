@@ -39,6 +39,7 @@ This file records what we know about the `SPEED2.EXE` career save (`20CM` magic,
 | Relative offset | Size | Meaning |
 | --- | --- | --- |
 | `+0x000` | `0xE0` | Donor block 1 (car identity and body data) |
+| `+0x014` | 4 | Car type hash (uint32 LE); used for names and GLOBALB.BUN physics |
 | `+0x0E0` | `0x1D0` | Donor block 2 |
 | `+0x2B0` | `0x14` | Donor block 3, end-of-car data |
 | `+0x27C` | 24 | Used header. A non-zero uint16 means the slot is used |
@@ -49,7 +50,7 @@ This file records what we know about the `SPEED2.EXE` career save (`20CM` magic,
 | `+0x462` | 420 | Unlock table, bytes `00` or `FF` |
 
 - Donor blocks are read from absolute offsets `0x5870`, `0x5950`, and `0x5B20`.
-- The model key maps to a car through the donor list in `car-donors.json`. Several cars share a key (base, sponsor, and intro versions), so the first name listed is shown.
+- The car type hash at `+0x014` maps to a car through the donor list in `car-donors.json`. Variants of the same car (base, sponsor and intro) show the first name listed. The `+0x2BC` model key is not a unique car identity: Sentra, Golf and Tiburon share `FA26AF42`; Audi TT and Celica share `78ADB9AF`. Replacement already writes the type hash in donor block 1. Slot names and DYNO use the same hash reader.
 
 ### Performance flags
 

@@ -29,6 +29,8 @@ export const SLOT_USED_OFF = 0x27c;
 export const SLOT_HEADER_LEN = 24;
 /** Slot-relative model key (last 4 bytes of the `+0x2B0` block). */
 export const CAR_KEY_REL = 0x2bc;
+/** Slot-relative car type hash, matching the GLOBALB.BUN car record. */
+export const CAR_TYPE_HASH_REL = 0x14;
 /** Slot-relative link block; all zero means it is not linked. */
 export const SLOT_LINK_OFF = 0x294;
 /** Length of the link block. */

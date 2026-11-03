@@ -3,7 +3,7 @@ import type { Donor } from './cars.js';
 /** What a car slot shows: locked, unlocked with no car bought (open for a sponsor car), or filled with a bought car. */
 export type SlotState = 'locked' | 'open' | 'filled';
 import {
-  dataView, bytesToHex, slotBase, SLOT_BASE, SLOT_COUNT, SLOT_STRIDE, SLOT_USED_OFF, SLOT_HEADER_LEN, CAR_KEY_REL,
+  dataView, bytesToHex, slotBase, SLOT_BASE, SLOT_COUNT, SLOT_STRIDE, SLOT_USED_OFF, SLOT_HEADER_LEN, CAR_KEY_REL, CAR_TYPE_HASH_REL,
   SLOT_LINK_OFF, SLOT_LINK_LEN, SLOT_LOCK_REL, SLOT_BOUGHT_REL, GARAGE_CAR_COUNT, GARAGE_CAR_MAX, PERF_OFF,
 } from './layout.js';
 import { PERF_COUNT } from './perf.js';
@@ -19,7 +19,7 @@ export function isSlotUsed(data: Uint8Array, slot: number): boolean {
 }
 
 /**
- * Model key of the car in a slot.
+ * Shared model key of the car in a slot; not unique enough for car identification.
  * @param data Save bytes.
  * @param slot Slot index.
  * @returns Upper-case hex, 8 digits. `00000000` means no car.
@@ -27,6 +27,11 @@ export function isSlotUsed(data: Uint8Array, slot: number): boolean {
 export function getCarKey(data: Uint8Array, slot: number): string {
   const start = slotBase(slot) + CAR_KEY_REL;
   return bytesToHex(data.subarray(start, start + 4));
+}
+
+/** Car type hash used by the game physics tables and slot-name identification. */
+export function getCarTypeHash(data: Uint8Array, slot: number): number {
+  return dataView(data).getUint32(slotBase(slot) + CAR_TYPE_HASH_REL, true);
 }
 
 /**

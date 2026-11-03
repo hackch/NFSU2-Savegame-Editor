@@ -17,7 +17,7 @@
       </div>
       <div class="editor-build">
         <span class="build-badge" title="Build number: UTC date and time (YYYYMMDDhhmmss)">v__APP_VERSION__ &middot; Build __BUILD_NUMBER__</span>
-        <p class="build-splash">Now with unique performance parts!</p>
+        <p class="build-splash">Now with DYNO!</p>
       </div>
     </div>
   </header>
@@ -66,17 +66,14 @@
             </div>
           </div>
           <p class="muted" ng-if="slot.state === 'locked'">Locked. Its car is hidden until the slot is unlocked.</p>
-          <p class="slot-car-name">
-            {{ slot.car ? slot.car.name : (slot.key === '00000000' ? (slot.state === 'open' ? 'Open for a sponsor car' : 'No car') : 'Unknown car (key ' + slot.key + ')') }}
+          <p class="slot-car-name" ng-if="slot.state === 'filled'">
+            {{ slot.car ? slot.car.name : 'Unknown car' }}
           </p>
+          <p class="slot-car-name muted" ng-if="slot.state === 'open'">Open for a sponsor car</p>
           <div class="bike-actions">
             <button type="button" class="profile-action-btn" ng-click="toggleLock(slot.index)">{{ slot.state === 'locked' ? 'Unlock slot' : 'Lock slot' }}</button>
-          </div>
-          <div class="bike-actions" ng-if="slot.state === 'filled'">
-            <button type="button" class="profile-action-btn" ng-click="openTuning(slot.index)">Tuning…</button>
-            <button type="button" class="profile-action-btn" ng-click="installAll(slot.index, true)">All raw performance flags</button>
-            <button type="button" class="profile-action-btn" ng-click="installAll(slot.index, false)">Clear performance flags</button>
-            <button type="button" class="profile-action-btn" ng-click="toggleUnlocks(slot.index)">{{ slot.unlocked === unlockTotal ? 'Lock parts' : 'Unlock parts' }}</button>
+            <button type="button" class="profile-action-btn" ng-if="slot.state === 'filled'" ng-click="openTuning(slot.index)">Tuning…</button>
+            <button type="button" class="profile-action-btn" ng-if="slot.state === 'filled'" ng-click="toggleUnlocks(slot.index)">{{ slot.unlocked === unlockTotal ? 'Lock parts' : 'Unlock parts' }}</button>
           </div>
           <div class="bike-actions slot-operation">
             <select ng-model="replaceTarget[slot.index]" ng-options="d.id as d.name for d in donors" ng-disabled="!donors.length || slot.locked">
@@ -112,7 +109,10 @@
           <p class="landing-eyebrow">TUNING</p>
           <h3 id="tuningTitle">Car slot {{ tuning.slot + 1 }}</h3>
         </div>
-        <button type="button" class="bike-dialog-close" aria-label="Close dialog" ng-click="closeTuning()">×</button>
+        <div class="bike-dialog-actions">
+          <button type="button" class="profile-action-btn" ng-if="tuning.tab === 'PERF'" ng-click="maxOut(tuning.slot)">MAX OUT</button>
+          <button type="button" class="bike-dialog-close" aria-label="Close dialog" ng-click="closeTuning()">×</button>
+        </div>
       </div>
       <div class="tuning-tabs" role="tablist">
         <button type="button" role="tab" ng-repeat="tab in tuning.tabs track by tab.code"
@@ -132,8 +132,6 @@
         <div class="tuning-panel" ng-repeat="cat in tuning.categories track by cat.code" ng-if="tuning.sub === cat.code">
           <div class="bike-actions">
             <strong>{{ cat.label }}</strong>
-            <button type="button" class="profile-action-btn" ng-click="setCategory(cat, true)">All raw flags</button>
-            <button type="button" class="profile-action-btn" ng-click="setCategory(cat, false)">Clear raw flags</button>
           </div>
           <div class="tuning-part" ng-repeat="part in cat.parts track by part.index" ng-class="{ 'tuning-inactive': !part.active }">
             <label class="overlay-controls">
@@ -145,14 +143,76 @@
             <h4>Unique {{ cat.unique.label }}</h4>
             <label class="overlay-controls">
               <input type="checkbox" ng-model="cat.unique.on" ng-change="toggleUnique(cat.unique)">
-              Unique flag (experimental)
+              Unique flag
             </label>
           </section>
         </div>
       </div>
-      <div class="tuning-empty" ng-if="tuning.tab !== 'PERF'">
+      <div class="tuning-empty" ng-if="tuning.tab !== 'PERF' && tuning.tab !== 'DYNO'">
         <strong>{{ activeTabLabel() }}</strong>
         <span class="muted">Not mapped</span>
+      </div>
+      <div class="dyno-panel" ng-if="tuning.tab === 'DYNO'">
+        <div class="dyno-source">
+          <label class="profile-action-btn dyno-file">
+            {{ tuning.dyno.gameName ? 'Change game data' : 'Load game data' }}
+            <input type="file" accept=".bun,.BUN" nfsu-file-change="loadGameData">
+          </label>
+          <span class="muted" ng-if="!tuning.dyno.gameName">Pick <code>GLOBAL\GLOBALB.BUN</code> from your NFSU2 folder. It is read locally and never uploaded.</span>
+          <span class="muted" ng-if="tuning.dyno.gameName">{{ tuning.dyno.gameName }} loaded</span>
+        </div>
+        <p class="message error" ng-if="tuning.dyno.gameError">{{ tuning.dyno.gameError }}</p>
+        <p class="muted" ng-if="tuning.dyno.blocked">{{ tuning.dyno.blocked }}</p>
+        <div ng-if="tuning.dyno.rows.length">
+          <div class="dyno-setups" role="tablist" aria-label="Dyno setups">
+            <button type="button" role="tab" ng-repeat="name in tuning.dyno.setupNames track by $index"
+                    ng-class="{ active: tuning.dyno.setup === $index }"
+                    ng-click="selectSetup($index)">{{ name }}</button>
+          </div>
+          <div class="dyno-controls">
+            <strong>{{ tuning.dyno.carName }}</strong>
+            <label>
+              Goal
+              <select ng-model="tuning.dyno.goal" ng-change="setGoal()">
+                <option value="quarter">Quickest quarter mile</option>
+                <option value="accel60">Quickest 0–60 mph</option>
+                <option value="accel">Quickest 0–100 mph</option>
+                <option value="top">Highest top speed</option>
+                <option value="power">Maximum horsepower</option>
+                <option value="torque">Maximum torque</option>
+              </select>
+            </label>
+            <label class="dyno-gearing">
+              <input type="checkbox" ng-model="tuning.dyno.optimizeGearing" ng-change="setGoal()" ng-disabled="tuning.dyno.busy">
+              Optimize gearing
+            </label>
+            <button type="button" class="profile-action-btn" ng-click="optimizeDyno()" ng-disabled="tuning.dyno.busy">
+              {{ tuning.dyno.busy ? 'Tuning…' : (tuning.dyno.optimizeGearing ? 'Auto-tune ECU, turbo &amp; gearing' : 'Auto-tune ECU &amp; turbo') }}
+            </button>
+          </div>
+          <table class="dyno-table">
+            <thead>
+              <tr><th></th><th>Current</th><th ng-if="tuning.dyno.hasProposal">Auto-tuned</th></tr>
+            </thead>
+            <tbody>
+              <tr ng-repeat="row in tuning.dyno.rows track by row.label">
+                <th scope="row">{{ row.label }}<small ng-if="row.sub">{{ row.sub }}</small></th>
+                <td>
+                  <span class="dyno-value">{{ row.before.metric }}</span><span class="dyno-value" ng-if="row.before.imperial">{{ row.before.imperial }}</span>
+                  <small ng-if="row.before.rpm">@ {{ row.before.rpm }}</small>
+                </td>
+                <td ng-if="tuning.dyno.hasProposal" ng-class="{ better: row.better }">
+                  <span class="dyno-value">{{ row.after.metric }}</span><span class="dyno-value" ng-if="row.after.imperial">{{ row.after.imperial }}</span>
+                  <small ng-if="row.after.rpm">@ {{ row.after.rpm }}</small>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="bike-actions" ng-if="tuning.dyno.hasProposal">
+            <button type="button" class="profile-action-btn" ng-click="applyDyno()">Apply to {{ tuning.dyno.setupNames[tuning.dyno.setup] }} setup</button>
+            <span class="muted">Only the ECU and turbo curves change.</span>
+          </div>
+        </div>
       </div>
       <div class="bike-dialog-actions">
         <span></span>

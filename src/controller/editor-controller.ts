@@ -4,13 +4,19 @@ import {
 import { parseCarDatabase, buildCarIndex, identifyCar, type Donor } from '../model/cars.js';
 import { checkSave, verifyChecksums, recalculateChecksums, getMoney, setMoney, getName, setName } from '../model/save-file.js';
 import { PERF_OFF, SLOT_COUNT, UNIQUE_PERF_OFF } from '../model/layout.js';
-import { getCarKey, isCarBought, isSlotLocked, isSlotUsed, setSlotCar, setSlotLocked, slotState, swapSlots as swapCarSlots } from '../model/slots.js';
+import { getCarKey, getCarTypeHash, isCarBought, isSlotLocked, isSlotUsed, setSlotCar, setSlotLocked, slotState, swapSlots as swapCarSlots } from '../model/slots.js';
 import {
   getPerfFlag, getPerfPurchased, getUniquePerfValue, perfOffset, perfPurchaseOffset,
   setPerfFlag, setPerfFlags, setUniquePerfFlag, uniquePerfOffset, UNIQUE_PERF_COUNT,
 } from '../model/perf.js';
 import { countUnlocked, setUnlocks, UNLOCK_COUNT } from '../model/unlocks.js';
-import type { CategoryView, EditorScope, PartView, SlotView, Status, TuningTab, UniquePartView } from './editor-scope.js';
+import {
+  DynoModel, findCar, KW_TO_HP, MPH_TO_KMH, NM_TO_LBFT, optimizeSetup, parseGameData, readSlotDyno, setSetupTuning, SETUP_NAMES,
+  type DynoResult, type GameData,
+} from '../model/dyno.js';
+import type {
+  CategoryView, DynoCell, DynoRow, EditorScope, PartView, SlotView, Status, TuningTab, UniquePartView,
+} from './editor-scope.js';
 
 const partsByIndex = new Map<number, PerfPart>(PERF_PARTS.map((p) => [p.index, p]));
 const tuningPerfIndexSet = new Set(TUNING_PERF_INDICES);
@@ -21,6 +27,7 @@ const TUNING_TABS: TuningTab[] = [
   { code: 'BODY', label: 'BODY PARTS' },
   { code: 'GRAPHICS', label: 'GRAPHICS' },
   { code: 'SPECIALTIES', label: 'SPECIALTIES' },
+  { code: 'DYNO', label: 'DYNO' },
 ];
 
 /**
@@ -31,7 +38,9 @@ const TUNING_TABS: TuningTab[] = [
 export function EditorController($scope: EditorScope): void {
   let data: Uint8Array | null = null;
   let donors: Donor[] = [];
-  let donorIndex = new Map<string, Donor>();
+  let donorIndex = new Map<number, Donor>();
+  let game: GameData | null = null;
+  let proposal: { slot: number; setup: number; gearing: boolean; bytes: Uint8Array; before: DynoResult; after: DynoResult } | null = null;
 
   $scope.loaded = false;
   $scope.fileName = '';
@@ -53,6 +62,10 @@ export function EditorController($scope: EditorScope): void {
     tab: 'PERF',
     sub: TUNING_PERF_CATEGORIES[0].code,
     categories: [],
+    dyno: {
+      gameName: '', gameError: '', setup: 1, setupNames: SETUP_NAMES, goal: 'quarter', optimizeGearing: false,
+      carName: '', blocked: '', busy: false, rows: [], hasProposal: false,
+    },
   };
 
   fetch('./car-donors.json')
@@ -94,13 +107,16 @@ export function EditorController($scope: EditorScope): void {
         bought: isCarBought(bytes, index),
         state: slotState(bytes, index),
         key,
-        car: identifyCar(donorIndex, key),
+        car: identifyCar(donorIndex, getCarTypeHash(bytes, index)),
         perfCount: TUNING_PERF_INDICES.filter((i) => getPerfFlag(bytes, index, i)).length,
         uniqueCount: UNIQUE_PERF_PARTS.filter((p) => getUniquePerfValue(bytes, index, p.index) !== 0).length,
         unlocked: countUnlocked(bytes, index),
       };
     });
-    if ($scope.tuning.open) rebuildTuning();
+    if ($scope.tuning.open) {
+      rebuildTuning();
+      rebuildDyno();
+    }
   }
 
   function rebuildTuning(): void {
@@ -140,9 +156,42 @@ export function EditorController($scope: EditorScope): void {
     });
   }
 
+  /** Builds the dyno model of the open tuning slot, or explains why there is none. */
+  function dynoModel(): { model: DynoModel; setups: Uint8Array[] } | { reason: string } {
+    if (!data) return { reason: 'Load a save first.' };
+    if (!game) return { reason: '' };
+    const sd = readSlotDyno(data, $scope.tuning.slot);
+    const car = findCar(game, sd.hash);
+    if (!car) return { reason: 'This car is not in the loaded game data.' };
+    const model = new DynoModel(game, car, sd.installed, sd.uniques);
+    if (!model.ecuTunable && !model.turboTunable && !model.gearingParameters.length) {
+      return { reason: `${car.name}: install a tunable ECU, turbo or transmission package to unlock dyno tuning.` };
+    }
+    return { model, setups: sd.setups };
+  }
+
+  function rebuildDyno(): void {
+    const view = $scope.tuning.dyno;
+    view.rows = [];
+    view.carName = '';
+    view.hasProposal = false;
+    const built = dynoModel();
+    if ('reason' in built) {
+      view.blocked = built.reason;
+      return;
+    }
+    view.blocked = '';
+    view.carName = built.model.car.name;
+    const before = built.model.evaluate(built.setups[view.setup]);
+    const prop = proposal && proposal.slot === $scope.tuning.slot && proposal.setup === view.setup ? proposal : null;
+    view.hasProposal = prop !== null;
+    view.rows = dynoRows(before, prop ? prop.after : null);
+  }
+
   /** Replaces the working bytes and re-renders. */
   function applyResult(next: Uint8Array): void {
     data = next;
+    proposal = null;
     refresh();
   }
 
@@ -206,11 +255,14 @@ export function EditorController($scope: EditorScope): void {
     $scope.tuning.open = true;
     $scope.tuning.tab = 'PERF';
     $scope.tuning.sub = TUNING_PERF_CATEGORIES[0].code;
+    proposal = null;
     rebuildTuning();
+    rebuildDyno();
   };
 
   $scope.selectTab = function (code: string): void {
     $scope.tuning.tab = code;
+    if (code === 'DYNO') rebuildDyno();
   };
 
   $scope.selectSub = function (code: string): void {
@@ -261,10 +313,6 @@ export function EditorController($scope: EditorScope): void {
 
   $scope.toggleUnique = function (part: UniquePartView): void {
     if (!data) return;
-    if (!confirm(`${part.on ? 'Enable' : 'Disable'} unique ${part.label}?\n\nExperimental flag-only edit, not a complete reward. Keep a backup.`)) {
-      rebuildTuning();
-      return;
-    }
     try {
       applyResult(setUniquePerfFlag(data, $scope.tuning.slot, part.index, part.on));
       setStatus('success', `Unique ${part.label} flag updated. Download to save.`);
@@ -274,26 +322,14 @@ export function EditorController($scope: EditorScope): void {
     }
   };
 
-  $scope.setCategory = function (cat: CategoryView, on: boolean): void {
+  $scope.maxOut = function (slot: number): void {
     if (!data) return;
-    const category = TUNING_PERF_CATEGORIES.find((item) => item.code === cat.code);
-    if (!category) {
-      rebuildTuning();
-      setStatus('error', 'This category is not available in performance tuning; its bytes were left unchanged.');
-      return;
+    let next = setPerfFlags(data, slot, TUNING_PERF_INDICES, true);
+    for (const part of UNIQUE_PERF_PARTS) {
+      next = setUniquePerfFlag(next, slot, part.index, true);
     }
-    if (on && !confirm(`Set all active ${category.label} raw flags, including conflicting parts?`)) {
-      return;
-    }
-    applyResult(setPerfFlags(data, $scope.tuning.slot, category.indices.filter((index) => tuningPerfIndexSet.has(index)), on));
-  };
-
-  $scope.installAll = function (slot: number, on: boolean): void {
-    if (!data) return;
-    if (on && !confirm(`Set all ${TUNING_PERF_INDICES.length} active performance part flags on this car? Superseded parts (for example the upgrade muffler under a full catback) will also be set, which the game does not do. Only muffler and cold air intake are verified in-game. Purchase bits, inactive IDs and unique dwords stay unchanged.`)) {
-      return;
-    }
-    applyResult(setPerfFlags(data, slot, TUNING_PERF_INDICES, on));
+    applyResult(next);
+    setStatus('success', `All ${TUNING_PERF_INDICES.length} performance flags and ${UNIQUE_PERF_PARTS.length} unique flags set on car slot ${slot + 1}. Download to save.`);
   };
 
   $scope.swapSlots = function (slot: number): void {
@@ -332,6 +368,68 @@ export function EditorController($scope: EditorScope): void {
     }
   };
 
+  $scope.loadGameData = function (file: File | null): void {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      $scope.$apply(() => {
+        try {
+          game = parseGameData(new Uint8Array(reader.result as ArrayBuffer));
+          $scope.tuning.dyno.gameName = file.name;
+          $scope.tuning.dyno.gameError = '';
+        } catch (err) {
+          game = null;
+          $scope.tuning.dyno.gameName = '';
+          $scope.tuning.dyno.gameError = errorMessage(err);
+        }
+        proposal = null;
+        rebuildDyno();
+      });
+    };
+    reader.onerror = () => $scope.$apply(() => { $scope.tuning.dyno.gameError = 'Could not read the file.'; });
+    reader.readAsArrayBuffer(file);
+  };
+
+  $scope.selectSetup = function (setup: number): void {
+    $scope.tuning.dyno.setup = setup;
+    rebuildDyno();
+  };
+
+  $scope.setGoal = function (): void {
+    proposal = null;
+    rebuildDyno();
+  };
+
+  $scope.optimizeDyno = function (): void {
+    const view = $scope.tuning.dyno;
+    const built = dynoModel();
+    if ('reason' in built || view.busy) return;
+    const slot = $scope.tuning.slot, setup = view.setup, goal = view.goal, gearing = view.optimizeGearing;
+    view.busy = true;
+    // Let the page paint the busy state before the search blocks the thread.
+    setTimeout(() => {
+      $scope.$apply(() => {
+        try {
+          const result = optimizeSetup(built.model, built.setups[setup], goal, gearing);
+          if (view.goal === goal && view.optimizeGearing === gearing) {
+            proposal = { slot, setup, gearing, bytes: result.setup, before: result.before, after: result.after };
+          }
+        } catch (err) {
+          setStatus('error', errorMessage(err));
+        }
+        view.busy = false;
+        rebuildDyno();
+      });
+    }, 30);
+  };
+
+  $scope.applyDyno = function (): void {
+    if (!data || !proposal) return;
+    const { slot, setup, bytes, gearing } = proposal;
+    applyResult(setSetupTuning(data, slot, setup, bytes, gearing));
+    setStatus('success', `Slot ${slot + 1}: ${SETUP_NAMES[setup]} ECU and turbo${gearing ? ' and gearing' : ''} tuned. Download to save.`);
+  };
+
   $scope.download = function (): void {
     if (!data) return;
     const out = recalculateChecksums(data);
@@ -358,4 +456,36 @@ function errorMessage(err: unknown): string {
 
 function hex(value: number, digits = 4): string {
   return `0x${value.toString(16).toUpperCase().padStart(digits, '0')}`;
+}
+
+/**
+ * Dyno table rows with metric and imperial values side by side; `after` is null without a proposal.
+ * @param before Results of the current setup.
+ * @param after Results of the optimized setup, if any.
+ * @returns Display rows.
+ */
+function dynoRows(before: DynoResult, after: DynoResult | null): DynoRow[] {
+  const num = (v: number, digits = 0) => v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  const time = (v: number): DynoCell => ({ metric: Number.isFinite(v) ? `${num(v, 2)} s` : '–', imperial: '', rpm: '' });
+  const speed = (mph: number): DynoCell => ({ metric: `${num(mph * MPH_TO_KMH)} km/h`, imperial: `${num(mph)} mph`, rpm: '' });
+  type Spec = [string, string, (r: DynoResult) => number, (r: DynoResult) => DynoCell, boolean];
+  const specs: Spec[] = [
+    ['Peak power', '', (r) => r.peakPower,
+      (r) => ({ metric: `${num(r.peakPower)} kW`, imperial: `${num(r.peakPower * KW_TO_HP)} hp`, rpm: `${num(r.peakPowerRpm)} rpm` }), true],
+    ['Peak torque', '', (r) => r.peakTorque,
+      (r) => ({ metric: `${num(r.peakTorque)} N·m`, imperial: `${num(r.peakTorque * NM_TO_LBFT)} lb-ft`, rpm: `${num(r.peakTorqueRpm)} rpm` }), true],
+    ['0–60 mph', '0–97 km/h', (r) => r.t60, (r) => time(r.t60), false],
+    ['0–100 mph', '0–161 km/h', (r) => r.t100, (r) => time(r.t100), false],
+    ['Quarter mile', '402 m', (r) => r.quarterMile, (r) => time(r.quarterMile), false],
+    ['Trap speed', '', (r) => r.trapSpeed, (r) => speed(r.trapSpeed), true],
+    ['Top speed', '', (r) => r.topSpeed, (r) => speed(r.topSpeed), true],
+  ];
+  return specs.map(([label, sub, value, cell, higher]) => {
+    const b = cell(before), a = after ? cell(after) : null;
+    const changed = a !== null && (a.metric !== b.metric || a.imperial !== b.imperial);
+    return {
+      label, sub, before: b, after: a,
+      better: changed && after !== null && (higher ? value(after) > value(before) : value(after) < value(before)),
+    };
+  });
 }

@@ -402,6 +402,12 @@ body.resizing-sidebar {
 .bike-dialog-heading .landing-eyebrow { margin-bottom: 6px; }
 .bike-dialog-heading h3 { color: var(--text); font-size: 22px; }
 
+.bike-dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .bike-dialog-close {
   width: 34px;
   height: 34px;
