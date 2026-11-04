@@ -384,6 +384,8 @@ export function findCar(game: GameData, hash: number): CarRecord | null {
 const R = (car: CarRecord, off: number): number => car.view.getFloat32(off, true);
 const clamp = (v: number, lo: number, hi: number): number => Math.min(Math.max(v, lo), hi);
 const byteT = (b: number): number => clamp((b - 100) * 0.01, -1, 1);
+// Float32 variant for the gear decode (FUN_0059aee0, FUN_005b4780): (b-100)*0.01f.
+const byteT32 = (b: number): number => clamp(Math.fround(Math.fround(b - 100) * Math.fround(0.01)), -1, 1);
 
 function clonePhys(p: Phys): Phys {
   return { f: p.f.slice(), gearCount: p.gearCount };
@@ -722,22 +724,25 @@ export class DynoModel {
   private setGear(p: Phys, value: number, param: number): void {
     const arr: number[] = [];
     for (let k = 10; k <= 15; k++) arr[k] = g(p, 0x1b0 + k * 4);
-    const ed = (v: number, q: number): number => {
-      const [mn, mx] = this.range(p, q);
+    // FUN_005b2ed0 runs in float32 (ratios, ranges, the 0.05f spacing and the excess sums).
+    const fr = Math.fround, SP = fr(GEAR_SPACING);
+    const ed = (v0: number, q: number): number => {
+      const v = fr(v0);
+      const [mn, mx] = this.range(p, q).map(fr) as [number, number];
       const c = clamp(v, mn, mx);
-      const d = v - arr[q];
+      const d = fr(v - arr[q]);
       if (d === 0) return 0;
       const dir = d > 0 && q >= 11 ? -1 : d < 0 && q < 15 ? 1 : 0;
-      let exc = v - c;
+      let exc = fr(v - c);
       if (dir) {
         const n = q + dir;
         const cur = arr[n];
         let next = cur;
-        if (dir > 0 && cur > c - GEAR_SPACING) next = c - GEAR_SPACING;
-        else if (dir < 0 && cur < c + GEAR_SPACING) next = c + GEAR_SPACING;
-        if (next !== cur) exc += ed(next, n);
+        if (dir > 0 && cur > fr(c - SP)) next = fr(c - SP);
+        else if (dir < 0 && cur < fr(c + SP)) next = fr(c + SP);
+        if (next !== cur) exc = fr(exc + ed(next, n));
       }
-      arr[q] = v - exc;
+      arr[q] = fr(v - exc);
       return exc;
     };
     ed(value, param);
@@ -782,7 +787,9 @@ export class DynoModel {
       const def = this.defs.get(prm);
       if (def === undefined) continue;
       const [lo, hi] = this.range(p, prm);
-      const v = (hi - lo) * byteT(setup[prm]) + def;
+      // FUN_0059aee0 / FUN_005b4780 decode in float32: (max-min)*t+def.
+      const f = Math.fround;
+      const v = f(f(f(f(hi) - f(lo)) * byteT32(setup[prm])) + f(def));
       if (prm === 9) {
         const cv = clamp(v, lo, hi);
         s(p, 0x1b8, cv); s(p, 0x1bc, cv);
@@ -794,7 +801,8 @@ export class DynoModel {
       const def = this.defs.get(prm);
       if (def === undefined) continue;
       const [lo, hi] = this.range(p, prm);
-      const value = clamp((hi - lo) * byteT(gearBytes[prm]) + def, lo, hi);
+      const f = Math.fround;
+      const value = clamp(f(f(f(f(hi) - f(lo)) * byteT32(gearBytes[prm])) + f(def)), lo, hi);
       this.setGear(p, value, prm);
       // The load's second pass re-encodes every active gear before reading the next byte.
       for (let gear = 10; gear <= 15; gear++) {
@@ -802,7 +810,10 @@ export class DynoModel {
         if (gearDef === undefined) continue;
         const [min, max] = this.range(p, gear);
         const ratio = clamp(g(p, 0x1b0 + gear * 4), min, max);
-        gearBytes[gear] = clamp(Math.floor(100.5 + 100 * (ratio - gearDef) / (max - min)), 0, MAX_TUNE_BYTE);
+        // FUN_005b3ee0 -> FUN_0059af80 encode in float32: trunc(frac*100f + 100.5f).
+        const f = Math.fround;
+        const frac = f(f(f(ratio) - f(gearDef)) / f(f(max) - f(min)));
+        gearBytes[gear] = clamp(Math.floor(f(f(frac * 100) + 100.5)), 0, MAX_TUNE_BYTE);
       }
     }
     applyScalars(16, 22);
