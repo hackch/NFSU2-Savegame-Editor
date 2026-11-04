@@ -571,8 +571,12 @@ export class DynoModel {
 
   private static ratioAt(p: Phys, speed: number): number {
     const bias = g(p, 0x1c0);
-    const r = bias < 0.2 ? g(p, 0x50) : bias > 0.8 ? g(p, 0x80) : g(p, 0x80) * bias + (1 - bias) * g(p, 0x50);
-    return r / speed * (g(p, 0x1f4) * RAD_PER_RPM / g(p, 0x1b8));
+    // FUN_0059b5c0 works in float32 with 2*pi/60 = 0.10471967f (0x7A1D38), not the power factor 0.10471204.
+    const f = Math.fround, b = f(bias);
+    const r = b < f(0.2) ? f(g(p, 0x50)) : b > f(0.8) ? f(g(p, 0x80))
+      : f(f(f(1 - b) * f(g(p, 0x50))) + f(f(g(p, 0x80)) * b));
+    const w = f(f(g(p, 0x1f4)) * f(0.10471966862678528));
+    return f(f(r / f(speed)) * f(w / f(g(p, 0x1b8))));
   }
 
   private modifyBounds(param: number, lo: number, hi: number): [number, number] {
