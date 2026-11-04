@@ -815,7 +815,12 @@ export class DynoModel {
       const defs = this.curveDefs.get(prm) as number[];
       for (let i = 0; i < 9; i++) {
         const [lo, hi] = this.range(p, prm, i);
-        const v = clamp((hi - lo) * byteT(setup[off + i]) + defs[i], lo, hi);
+        const req = (hi - lo) * byteT(setup[off + i]) + defs[i];
+        // FUN_005b2c00 writes nothing when the request equals the current point exactly (neutral byte), so a
+        // default above the power cap is kept unclamped.
+        const cur = prm === P_ECU ? g(p, 0x200 + 4 * i) - g(p, 0x224 + 4 * i) : g(p, 0x224 + 4 * i);
+        if (req === cur) continue;
+        const v = clamp(req, lo, hi);
         if (prm === P_ECU) {
           s(p, 0x200 + 4 * i, v + g(p, 0x224 + 4 * i));
         } else {
