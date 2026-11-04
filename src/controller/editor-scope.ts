@@ -2,7 +2,7 @@ import type { Donor } from '../model/cars.js';
 import type { ChecksumStatus } from '../model/save-file.js';
 import type { SlotState } from '../model/slots.js';
 import type { PerfPart, UniquePerfPart } from '../data/perf-parts.js';
-import type { DynoPreference } from '../model/dyno.js';
+import type { CurveKind, DynoEvent } from '../model/dyno.js';
 
 /** Result of a donor-list or file-load problem, shown in the status line. */
 export interface Status {
@@ -71,20 +71,97 @@ export interface DynoRow {
   better: boolean;
 }
 
+/** One RPM column of the ECU/turbo graph, in SVG units. */
+export interface CurveColumn {
+  index: number;
+  x: number;
+  width: number;
+  /** Top and height of the allowed min–max range. */
+  rangeY: number;
+  rangeH: number;
+  stockY: number;
+  valueY: number;
+  valueH: number;
+  /** Value after the load's sum restore; differs from valueY only for independently set points. */
+  effY: number;
+  rpmLabel: string;
+}
+
+/** ECU or turbo graph in the dyno tab. */
+export interface CurveChart {
+  width: number;
+  height: number;
+  /** Plot area. */
+  left: number;
+  top: number;
+  bottom: number;
+  /** Value in N·m at the top of the plot area. */
+  yMax: number;
+  ticks: { y: number; label: string }[];
+  columns: CurveColumn[];
+  /** Selected column details, formatted. */
+  selected: {
+    rpm: string; value: string; stock: string; range: string; change: string; canDown: boolean; canUp: boolean;
+    /** Value in game after the sum restore, or empty when it equals the set value. */
+    effective: string;
+    /** The effective value lies outside the game's range. */
+    beyond: boolean;
+  };
+}
+
+/** Graph tab of the dyno editor: an ECU/turbo curve or the drivetrain screen. */
+export type DynoTab = CurveKind | 'drive';
+
+/** One drivetrain row; positions are percentages of the bar width. */
+export interface GearBar {
+  param: number;
+  label: string;
+  value: string;
+  sub: string;
+  final: boolean;
+  /** Allowed range. */
+  lo: number;
+  hi: number;
+  at: number;
+  stock: number;
+}
+
+/** Drivetrain screen in the dyno tab. */
+export interface GearChart {
+  rows: GearBar[];
+  /** Speed scale of the gear bars, km/h. */
+  ticks: { at: number; label: string }[];
+  selected: { label: string; value: string; stock: string; range: string; downLabel: string; upLabel: string; canDown: boolean; canUp: boolean };
+}
+
 /** State of the dyno tab. */
 export interface DynoView {
   gameName: string;
   gameError: string;
-  setup: number;
+  setup: DynoEvent;
   setupNames: string[];
-  goal: DynoPreference;
+  strategy: string;
   optimizeGearing: boolean;
   carName: string;
   /** Empty when the car can be tuned, else the reason it cannot. */
   blocked: string;
   busy: boolean;
   rows: DynoRow[];
+  /** True when the draft differs from the saved setup. */
   hasProposal: boolean;
+  /** Curves unlocked by the installed parts. */
+  curveTabs: { kind: DynoTab; label: string }[];
+  curve: DynoTab;
+  /**
+   * Save-only curve editing: points are set independently, which the game UI never does. Off follows the game's
+   * tuning screen, where neighbours absorb a point's change.
+   */
+  cheat: boolean;
+  point: number;
+  chart: CurveChart | null;
+  /** Selected drivetrain row. */
+  gear: number;
+  drive: GearChart | null;
 }
 
 /** Top-level tuning tab. */
@@ -93,12 +170,20 @@ export interface TuningTab {
   label: string;
 }
 
+/** Profile choice for an nfsu2-web backup ZIP. */
+export interface BackupView {
+  current: number;
+  note: string;
+  profiles: { index: number; label: string }[];
+}
+
 /** State and actions the editor template binds to. */
 export interface EditorScope extends angular.IScope {
   loaded: boolean;
   fileName: string;
   fileSize: number;
   checks: ChecksumStatus | null;
+  backup: BackupView | null;
   status: Status;
   form: { name: string; money: number };
   slots: SlotView[];
@@ -120,6 +205,7 @@ export interface EditorScope extends angular.IScope {
   };
 
   loadFile(file: File | null): void;
+  selectProfile(index: number): void;
   checksumText(): string;
   usedCount(): number;
   applyProfile(): void;
@@ -136,9 +222,20 @@ export interface EditorScope extends angular.IScope {
   swapSlots(slot: number): void;
   replaceCar(slot: number): void;
   loadGameData(file: File | null): void;
-  selectSetup(setup: number): void;
-  setGoal(): void;
+  selectSetup(setup: DynoEvent): void;
   optimizeDyno(): void;
   applyDyno(): void;
+  discardDyno(): void;
+  selectCurve(kind: DynoTab): void;
+  selectGear(index: number): void;
+  /** Positive is faster for a gear and towards Acceleration for final drive. */
+  stepGear(delta: number): void;
+  gearPointer(event: MouseEvent, index: number, start: boolean): void;
+  gearKey(event: KeyboardEvent): void;
+  selectPoint(index: number): void;
+  stepPoint(delta: number): void;
+  resetCurve(): void;
+  curvePointer(event: MouseEvent, start: boolean): void;
+  curveKey(event: KeyboardEvent): void;
   download(): void;
 }

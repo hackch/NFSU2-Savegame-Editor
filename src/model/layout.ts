@@ -21,8 +21,20 @@ export const NAME_MAX_BYTES = 31;
 export const SLOT_BASE = 0x5870;
 /** Distance between car slots. */
 export const SLOT_STRIDE = 0x7f2;
-/** Number of car slots. */
+/** Number of car slots in a career save. */
 export const SLOT_COUNT = 5;
+/** Native car records start 8 bytes before the editor's slot base; record +4 is the `CAREER_SLOT_<n>` handle. */
+export const SLOT_RECORD_REL = -8;
+/** Slot-relative end of a native 2,034-byte car record. */
+export const SLOT_RECORD_END_REL = SLOT_STRIDE + SLOT_RECORD_REL;
+/** Size of the career saves nfsu2-web pairs with a GARAGE.DAT. */
+export const PROFILE_SIZE = 54966;
+/** Slots 6-10 from an nfsu2-web GARAGE.DAT are kept after the career bytes in the editor's working buffer. */
+export const EXTRA_SLOT_RECORD_BASE = PROFILE_SIZE;
+/** Number of slots with nfsu2-web's GARAGE.DAT. */
+export const MAX_SLOT_COUNT = 10;
+/** Length of a career save plus its five GARAGE.DAT records. */
+export const EXTENDED_SAVE_SIZE = EXTRA_SLOT_RECORD_BASE + SLOT_COUNT * SLOT_STRIDE;
 /** Slot-relative used header; a non-zero uint16 means the slot holds a car. */
 export const SLOT_USED_OFF = 0x27c;
 /** Length of the used header copied when a slot is filled. */
@@ -61,15 +73,40 @@ export function dataView(data: Uint8Array): DataView {
 
 /**
  * Absolute offset of a car slot.
- * @param slot Slot index, 0 to {@link SLOT_COUNT} - 1.
+ * @param slot Slot index, 0 to {@link MAX_SLOT_COUNT} - 1. Slots 5-9 exist only in an extended buffer.
  * @returns Offset of the first byte of that slot.
  * @throws RangeError when the slot index is out of range.
  */
 export function slotBase(slot: number): number {
-  if (!Number.isInteger(slot) || slot < 0 || slot >= SLOT_COUNT) {
-    throw new RangeError(`Slot must be 0 to ${SLOT_COUNT - 1}.`);
+  if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_SLOT_COUNT) {
+    throw new RangeError(`Slot must be 0 to ${MAX_SLOT_COUNT - 1}.`);
   }
-  return SLOT_BASE + slot * SLOT_STRIDE;
+  if (slot < SLOT_COUNT) return SLOT_BASE + slot * SLOT_STRIDE;
+  return EXTRA_SLOT_RECORD_BASE + (slot - SLOT_COUNT) * SLOT_STRIDE - SLOT_RECORD_REL;
+}
+
+/**
+ * Number of car slots present in the working buffer.
+ * @param data Career bytes, optionally followed by GARAGE.DAT records.
+ * @returns 10 for an extended nfsu2-web buffer, otherwise 5.
+ */
+export function slotCount(data: Uint8Array): number {
+  return data.length === EXTENDED_SAVE_SIZE ? MAX_SLOT_COUNT : SLOT_COUNT;
+}
+
+/**
+ * Validates a slot against the bytes being edited.
+ * @param data Working bytes.
+ * @param slot Slot index.
+ * @returns Absolute slot base.
+ * @throws RangeError when the slot is not present in this buffer.
+ */
+export function checkedSlotBase(data: Uint8Array, slot: number): number {
+  const count = slotCount(data);
+  if (!Number.isInteger(slot) || slot < 0 || slot >= count) {
+    throw new RangeError(`Slot must be 0 to ${count - 1}.`);
+  }
+  return slotBase(slot);
 }
 
 /**

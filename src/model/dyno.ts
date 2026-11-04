@@ -55,6 +55,14 @@ const QUARTER_MILE_M = 400.5;
 const SPEED_STEP = 1.3410819;
 const RAD_PER_RPM = 0.10471204;
 const GEAR_SPACING = 0.05;
+/**
+ * FUN_005b2c00 redistribution: weights at 0x7FC674 for neighbours ±1, ±2, ±3, ±4 (the ninth float is the integer 3,
+ * a denormal); later neighbours take the whole remainder. The loop stops after 20 weight slots.
+ */
+const CURVE_WEIGHTS = [0.25, 0.25, -0.25, -0.25, -0.25, -0.25, -0.25, -0.25, 4.2e-45];
+const REDISTRIBUTE_STEPS = 20;
+/** Threshold 0x7A0354 (≈1e-7 in game units), in N·m. */
+const CURVE_EPSILON = 1e-4;
 const P_ECU = 23;
 const P_TURBO = 24;
 
@@ -118,8 +126,57 @@ export const MPH_TO_KMH = 1.609344;
 /** Optimization goals for {@link optimizeSetup}. */
 export type DynoGoal = 'quarter' | 'accel60' | 'accel' | 'top' | 'power' | 'torque';
 
-/** Three slider positions: acceleration, balanced, top speed. */
-export type DynoPreference = 0 | 1 | 2;
+/** Event indices in SETUP_NAMES order. */
+export type DynoEvent = 0 | 1 | 2 | 3 | 4;
+
+export interface TuningBand {
+  minRpm: number;
+  maxRpm: number;
+  description: string;
+}
+
+/** Curves shown by the game's ECU and turbo tuning screens. */
+export type CurveKind = 'ecu' | 'turbo';
+
+/** One RPM column of an ECU or turbo curve. Torque values are in N·m. */
+export interface CurvePoint {
+  rpm: number;
+  min: number;
+  max: number;
+  /** Value at the neutral byte (the game's "Reset to default"); may lie outside min–max, where the game clamps it. */
+  stock: number;
+  value: number;
+  /** Final physics component including uniques: ECU = total minus turbo; turbo = its own curve, without sum restore. */
+  effective: number;
+  byte: number;
+  /** Byte range that still changes the value; bytes outside it are clamped by the game. */
+  minByte: number;
+  maxByte: number;
+}
+
+/** One row of the game's Drivetrain tuning screen: final drive (param 9) or a forward gear (10–15). */
+export interface GearRow {
+  param: number;
+  label: string;
+  ratio: number;
+  min: number;
+  max: number;
+  /** Ratio at the neutral byte. */
+  stock: number;
+  byte: number;
+  /** Road speed at the engine's `+0x1F4` rpm in this gear, km/h (`FUN_0059b5c0`); null for final drive. */
+  speed: number | null;
+  /** Speeds at the ratio limits (max ratio gives min speed), km/h; null for final drive. */
+  minSpeed: number | null;
+  maxSpeed: number | null;
+}
+
+/** Drivetrain screen of a setup. */
+export interface Gearing {
+  rows: GearRow[];
+  /** Gear speed in km/h is `speedFactor / ratio` with the current final drive. */
+  speedFactor: number;
+}
 
 export interface GearPowerWindow {
   fromGear: number;
@@ -296,7 +353,6 @@ export class DynoModel {
   private defs = new Map<number, number>();
   private curveDefs = new Map<number, number[]>();
   private curvePeak = new Map<number, number>();
-
   /**
    * @param game Parsed game data.
    * @param car Car record.
@@ -596,6 +652,154 @@ export class DynoModel {
     return { ...dragSim(p, this.car.index), topSpeed: topSpeed(p) * MPH, ...peaks(p) };
   }
 
+  /**
+   * Editable ECU or turbo curve of a setup, like the game's tuning graph, in N·m.
+   * @param setup 41 setup bytes.
+   * @param kind Which curve.
+   * @returns Nine points, or null when the installed parts do not unlock the curve.
+   */
+  curve(setup: ArrayLike<number>, kind: CurveKind): CurvePoint[] | null {
+    const param = kind === 'ecu' ? P_ECU : P_TURBO, off = kind === 'ecu' ? ECU_OFF : TURBO_OFF;
+    const p = this.tuned(setup);
+    if (!this.active(p, param)) return null;
+    const idle = g(p, 0x1f0), red = g(p, 0x1f8);
+    return (this.curveDefs.get(param) as number[]).map((stock, i) => {
+      const [min, max] = this.range(p, param, i);
+      const span = max - min;
+      const toByte = (value: number) => 100 + 100 * (value - stock) / span;
+      const value = clamp(span * byteT(setup[off + i]) + stock, min, max);
+      return {
+        rpm: idle + (red - idle) * i / 8,
+        min: min * 1000, max: max * 1000, stock: stock * 1000,
+        value: value * 1000,
+        effective: (kind === 'ecu' ? g(p, 0x200 + i * 4) - g(p, 0x224 + i * 4) : g(p, 0x224 + i * 4)) * 1000,
+        byte: setup[off + i],
+        minByte: clamp(Math.ceil(toByte(min) - 1e-6), 0, MAX_TUNE_BYTE),
+        maxByte: clamp(Math.floor(toByte(max) + 1e-6), 0, MAX_TUNE_BYTE),
+      };
+    });
+  }
+
+  /**
+   * Setup byte whose curve point is nearest a value, within the point's effective byte range.
+   * @param point Point from {@link curve}.
+   * @param nm Wanted value in N·m.
+   */
+  static curveByte(point: CurvePoint, nm: number): number {
+    if (point.maxByte <= point.minByte) return point.minByte;
+    const at = (b: number) => DynoModel.curveValue(point, b);
+    let best = point.minByte;
+    for (let b = point.minByte; b <= point.maxByte; b++) if (Math.abs(at(b) - nm) < Math.abs(at(best) - nm)) best = b;
+    return best;
+  }
+
+  /**
+   * Value in N·m that a setup byte gives a curve point.
+   * @param point Point from {@link curve}.
+   * @param byte Setup byte.
+   */
+  static curveValue(point: CurvePoint, byte: number): number {
+    return clamp(point.stock + byteT(byte) * (point.max - point.min), point.min, point.max);
+  }
+
+  /**
+   * Sets one ECU or turbo point like the game's tuning screen (FUN_005b2c00 with redistribution): the point is
+   * clamped to its range, then neighbours absorb the requested change so the curve's sum is kept.
+   * @param setup 41 setup bytes.
+   * @param kind Which curve.
+   * @param index Point 0–8.
+   * @param nm Wanted value in N·m.
+   * @returns Edited setup bytes; unchanged when the curve is locked.
+   */
+  withCurvePoint(setup: ArrayLike<number>, kind: CurveKind, index: number, nm: number): Uint8Array {
+    const out = Uint8Array.from(setup);
+    const points = this.curve(setup, kind);
+    if (!points) return out;
+    const cur = points.map((pt) => pt.value);
+    const delta = nm - cur[index];
+    cur[index] = clamp(nm, points[index].min, points[index].max);
+    if (Math.abs(delta) > CURVE_EPSILON) {
+      let remaining = delta, k = 0, w = 0;
+      do {
+        if (w >= REDISTRIBUTE_STEPS) break;
+        let amt = -remaining;
+        if (w < CURVE_WEIGHTS.length) {
+          amt = delta * CURVE_WEIGHTS[w];
+          amt = remaining <= 0 ? Math.max(amt, remaining) : Math.min(amt, remaining);
+        }
+        k = -k;
+        if (k >= 0 && ++k > 8) k = 1;
+        const n = index + k;
+        if (n >= 0 && n < 9) {
+          const nv = clamp(cur[n] + amt, points[n].min, points[n].max);
+          w++;
+          remaining += nv - cur[n];
+          cur[n] = nv;
+        }
+      } while (Math.abs(remaining) > CURVE_EPSILON);
+    }
+    const off = kind === 'ecu' ? ECU_OFF : TURBO_OFF;
+    points.forEach((pt, i) => {
+      if (Math.abs(cur[i] - pt.value) > CURVE_EPSILON) out[off + i] = DynoModel.curveByte(pt, cur[i]);
+    });
+    return out;
+  }
+
+  /**
+   * Final drive and forward gears of a setup, like the game's Drivetrain screen.
+   * @param setup 41 setup bytes.
+   * @returns Unlocked rows, or null when the installed parts unlock no gearing.
+   */
+  gearing(setup: ArrayLike<number>): Gearing | null {
+    const p = this.tuned(setup);
+    const params = this.gearingParameters.filter((prm) => this.defs.has(prm)).sort((a, b) => (a === 9 ? 1 : 0) - (b === 9 ? 1 : 0));
+    if (!params.length) return null;
+    const speedFactor = DynoModel.ratioAt(p, 1) * 3.6;
+    const names = ['1st', '2nd', '3rd', '4th', '5th', '6th'];
+    return {
+      speedFactor,
+      rows: params.map((param) => {
+        const [min, max] = this.range(p, param);
+        const ratio = param === 9 ? g(p, 0x1b8) : g(p, 0x1b0 + param * 4);
+        const gear = param !== 9;
+        return {
+          param, label: gear ? `${names[param - 10]} gear` : 'Final drive', ratio, min, max,
+          stock: this.defs.get(param) as number, byte: setup[param],
+          speed: gear ? speedFactor / ratio : null,
+          minSpeed: gear ? speedFactor / max : null,
+          maxSpeed: gear ? speedFactor / min : null,
+        };
+      }),
+    };
+  }
+
+  /**
+   * Sets one gearing ratio like the game's tuning screen setter (`FUN_005b4670`): the value is clamped to
+   * its range; a gear also moves its neighbours to keep the minimum spacing, then every active gear is
+   * re-encoded. Final drive only re-encodes its own byte.
+   * @param setup 41 setup bytes (not modified).
+   * @param param 9 final drive, 10–15 forward gears.
+   * @param ratio Wanted ratio.
+   * @returns New setup bytes.
+   */
+  withGearRatio(setup: ArrayLike<number>, param: number, ratio: number): Uint8Array {
+    const out = Uint8Array.from(setup);
+    const p = this.tuned(setup);
+    const encode = (prm: number, value: number): void => {
+      const def = this.defs.get(prm) as number;
+      const [min, max] = this.range(p, prm);
+      out[prm] = clamp(Math.floor(100.5 + 100 * (clamp(value, min, max) - def) / (max - min)), 0, MAX_TUNE_BYTE);
+    };
+    if (!this.defs.has(param) || !Number.isFinite(ratio)) return out;
+    if (param === 9) {
+      encode(9, ratio);
+      return out;
+    }
+    this.setGear(p, ratio, param);
+    for (let gear = 10; gear <= 15; gear++) if (this.defs.has(gear)) encode(gear, g(p, 0x1b0 + gear * 4));
+    return out;
+  }
+
   /** Power-band coverage for every forward shift, including those outside a timed run. */
   gearPowerWindows(setup: ArrayLike<number>): GearPowerWindow[] {
     const p = this.tuned(setup);
@@ -613,9 +817,50 @@ export class DynoModel {
       for (let j = 0; j <= steps; j++) {
         sum += power(landingRpm + (shiftRpm - landingRpm) * j / steps) * (j === 0 || j === steps ? 0.5 : 1);
       }
+
       return { fromGear: i + 1, shiftRpm, landingRpm, retention,
         powerCoverage: peak > 0 ? clamp(sum / steps / peak, 0, 1) : 0 };
     });
+  }
+
+  tuningBand(setup: ArrayLike<number>, event: DynoEvent): TuningBand {
+    if (!Number.isInteger(event) || event < 0 || event >= SETUP_COUNT) throw new RangeError('Select a valid dyno event.');
+    const p = this.tuned(setup), idle = g(p, 0x1f0), red = g(p, 0x1f8), span = red - idle;
+    const windows = this.gearPowerWindows(setup);
+    const recovery = windows.length ? Math.min(...windows.map((w) => w.landingRpm)) : idle + span * 0.5;
+    // Event targets are editor heuristics, not constants from the game or wiki.
+    const low = event === 2 ? 0.2 : event === 3 ? 0.25 : event === 1 ? 0.5 : 0.35;
+    const high = event === 2 ? 0.75 : event === 3 ? 0.85 : 1;
+    return {
+      minRpm: event === 2 || event === 3 ? idle + span * low :
+        Math.max(idle + span * low, Math.min(recovery, idle + span * 0.65)),
+      maxRpm: idle + span * high,
+      description: [
+        'Circuit: broad power through corner exits and shift recovery.',
+        'Drag: sustained high-RPM power and top-speed-biased gearing.',
+        'Drift: low–mid RPM response and acceleration-biased gearing.',
+        'Street X: low–mid RPM recovery for short tracks.',
+        'URL: broad usable power across repeated shifts.',
+      ][event],
+    };
+  }
+
+  /** Geometric mean of three band averages: a single RPM peak cannot replace low/mid-band power. */
+  usablePower(setup: ArrayLike<number>, band: TuningBand): number {
+    if (!(band.maxRpm > band.minRpm)) throw new RangeError('The tuning RPM band must have positive width.');
+    const p = this.tuned(setup), { tab, idle, inv } = torqueTable(p);
+    const averages = Array.from({ length: 3 }, (_, i) => {
+      const lo = band.minRpm + (band.maxRpm - band.minRpm) * i / 3;
+      const hi = band.minRpm + (band.maxRpm - band.minRpm) * (i + 1) / 3;
+      const steps = Math.max(1, Math.ceil((hi - lo) / 50));
+      let sum = 0;
+      for (let j = 0; j <= steps; j++) {
+        const rpm = lo + (hi - lo) * j / steps;
+        sum += Math.max(0, interp(tab, idle, inv, rpm) * rpm * RAD_PER_RPM) * (j === 0 || j === steps ? 0.5 : 1);
+      }
+      return sum / steps;
+    });
+    return Math.cbrt(averages[0] * averages[1] * averages[2]);
   }
 }
 
@@ -753,7 +998,7 @@ export function optimizeSetup(model: DynoModel, setup: ArrayLike<number>, goal: 
 }
 
 function searchSetup(model: DynoModel, setup: ArrayLike<number>, goal: DynoGoal, gearing: boolean,
-  objective: (result: DynoResult) => number = (result) => score(result, goal),
+  objective: (result: DynoResult, bytes: Uint8Array) => number = (result) => score(result, goal),
   accepts: (result: DynoResult) => boolean = () => true, budgetReference?: DynoResult, limitGoalLoss = true):
   { setup: Uint8Array; before: DynoResult; after: DynoResult } {
   const indices: number[] = [];
@@ -770,12 +1015,12 @@ function searchSetup(model: DynoModel, setup: ArrayLike<number>, goal: DynoGoal,
   const referenceWindows = gearIndices.some((idx) => idx !== 9) ? model.gearPowerWindows(reference) : [];
   const evenRetention = referenceWindows.length
     ? Math.pow(referenceWindows.reduce((product, window) => product * window.retention, 1), 1 / referenceWindows.length) : 0;
-  const initialScore = objective(budgetReference ?? before);
+  const initialScore = objective(budgetReference ?? before, start);
   const scale = Number.isFinite(initialScore) ? Math.max(1, Math.abs(initialScore)) : 1;
   const evalScore = (bytes: Uint8Array) => {
     const result = model.evaluate(bytes);
     if (!accepts(result)) return Infinity;
-    const value = objective(result);
+    const value = objective(result, bytes);
     if (!referenceWindows.length) return value;
     if (limitGoalLoss && Number.isFinite(initialScore) && value > initialScore + scale * 0.05) return Infinity;
     const windows = model.gearPowerWindows(bytes);
@@ -835,29 +1080,31 @@ function searchSetup(model: DynoModel, setup: ArrayLike<number>, goal: DynoGoal,
 }
 
 /**
- * Builds engine power, tunes for the slider preference, then refines power without
- * worsening any acceleration time or speed. Gearing is frozen during power passes.
+ * Tunes usable power for the selected event, then optional gearing and a guarded band refinement.
+ * The reference RPM band stays fixed during a run so gearing cannot game the objective.
  */
-export function optimizeDynoSetup(model: DynoModel, setup: ArrayLike<number>, preference: DynoPreference = 1, gearing = false):
-  { setup: Uint8Array; before: DynoResult; after: DynoResult; stages: { power: DynoResult; goal: DynoResult } } {
-  if (preference !== 0 && preference !== 1 && preference !== 2) throw new Error('Select a valid dyno goal.');
-  const power = searchSetup(model, setup, 'power', false);
-  const weights = preference === 0 ? [0.4, 0.25, 0.3, 0.05] :
-    preference === 1 ? [0.2, 0.2, 0.3, 0.3] : [0.05, 0.05, 0.1, 0.8];
+export function optimizeDynoSetup(model: DynoModel, setup: ArrayLike<number>, event: DynoEvent = 0, gearing = false):
+  { setup: Uint8Array; before: DynoResult; after: DynoResult; band: TuningBand; stages: { power: DynoResult; goal: DynoResult } } {
+  const band = model.tuningBand(setup, event);
+  const power = searchSetup(model, setup, 'power', false, (_r, bytes) => -model.usablePower(bytes, band));
+  const bandReference = Math.max(model.usablePower(power.setup, band), 1e-6);
+  const weights = event === 1 ? [0.05, 0.1, 0.35, 0.5] :
+    event === 2 || event === 3 ? [0.6, 0.25, 0.1, 0.05] : [0.2, 0.2, 0.3, 0.3];
   const baseline = power.after;
   const timeTerm = (value: number, reference: number, weight: number) =>
     Number.isFinite(reference) ? weight * value / Math.max(reference, 1e-6) : 0;
-  const objective = (r: DynoResult) =>
+  const objective = (r: DynoResult, bytes: Uint8Array) =>
+    -model.usablePower(bytes, band) / bandReference + 0.2 * (
     timeTerm(r.t60, baseline.t60, weights[0]) + timeTerm(r.t100, baseline.t100, weights[1]) +
     timeTerm(r.quarterExact, baseline.quarterExact, weights[2]) -
-    weights[3] * r.topSpeed / Math.max(baseline.topSpeed, 1);
+    weights[3] * r.topSpeed / Math.max(baseline.topSpeed, 1));
   let goal = searchSetup(model, power.setup, 'quarter', gearing, objective, () => true, power.after, false);
   goal = searchSetup(model, goal.setup, 'quarter', gearing, objective, () => true, power.after, false);
   const target = goal.after;
   const noSlower = (r: DynoResult) => r.t60 <= target.t60 && r.t100 <= target.t100 &&
     r.quarterMile <= target.quarterMile && r.quarterExact <= target.quarterExact &&
     r.topSpeed >= target.topSpeed && r.trapSpeed >= target.trapSpeed;
-  const refined = searchSetup(model, goal.setup, 'power', false, (r) => -r.peakPower, noSlower);
+  const refined = searchSetup(model, goal.setup, 'power', false, (_r, bytes) => -model.usablePower(bytes, band), noSlower);
   return { setup: refined.setup, before: power.before, after: refined.after,
-    stages: { power: power.after, goal: goal.after } };
+    band, stages: { power: power.after, goal: goal.after } };
 }

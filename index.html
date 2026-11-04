@@ -25,10 +25,18 @@
   <main class="editor-main">
     <section class="profile-section">
       <h3>Save file</h3>
-      <p class="muted">Start with a backup. Your file stays in this browser.</p>
+      <p class="muted">Start with a backup. Load a career save or an nfsu2-web backup ZIP. Your file stays in this browser.</p>
       <div class="editor-row">
-        <input type="file" id="file" aria-label="Choose career save file" accept="*/*" nfsu-file-change="loadFile">
+        <input type="file" id="file" aria-label="Choose career save or nfsu2-web backup ZIP" accept="*/*" nfsu-file-change="loadFile">
         <span class="muted" ng-if="fileName">{{ fileName }} ({{ fileSize }} bytes)</span>
+      </div>
+      <div class="editor-row" ng-if="backup">
+        <label>
+          nfsu2-web profile
+          <select ng-model="backup.current" ng-change="selectProfile(backup.current)"
+                  ng-options="profile.index as profile.label for profile in backup.profiles"></select>
+        </label>
+        <span class="muted">{{ backup.note }}</span>
       </div>
       <p class="message" ng-class="status.type" ng-if="status.text" role="status">{{ status.text }}</p>
     </section>
@@ -96,14 +104,15 @@
     <section class="profile-section download-section" ng-if="loaded">
       <div>
         <h3>Ready to hit the streets?</h3>
-        <p class="muted">Download a new file with recalculated checksums. Keep your original backup.</p>
+        <p class="muted">{{ backup ? 'Download the backup ZIP with recalculated save checksums and matching GARAGE.DAT fingerprints.' : 'Download a new file with recalculated checksums.' }} Keep your original backup.</p>
       </div>
-      <button type="button" class="profile-action-btn" ng-click="download()">Download edited save</button>
+      <button type="button" class="profile-action-btn" ng-click="download()">{{ backup ? 'Download edited ZIP' : 'Download edited save' }}</button>
     </section>
   </main>
 
   <div class="bike-dialog-backdrop" ng-if="tuning.open" ng-click="closeTuning()">
-    <section class="bike-dialog tuning-dialog" role="dialog" aria-modal="true" aria-labelledby="tuningTitle" ng-click="$event.stopPropagation()">
+    <section class="bike-dialog tuning-dialog" role="dialog" aria-modal="true" aria-labelledby="tuningTitle" ng-click="$event.stopPropagation()"
+             ng-class="{ 'tuning-dialog-dyno': tuning.tab === 'DYNO' }">
       <div class="bike-dialog-heading">
         <div>
           <p class="landing-eyebrow">TUNING</p>
@@ -171,28 +180,124 @@
           </div>
           <div class="dyno-controls">
             <strong>{{ tuning.dyno.carName }}</strong>
-            <div class="dyno-goal">
-              <label for="dyno-goal">Goal: {{ ['Acceleration', 'Balanced', 'Top speed'][tuning.dyno.goal] }}</label>
-              <input id="dyno-goal" type="range" min="0" max="2" step="1" ng-model="tuning.dyno.goal" ng-change="setGoal()"
-                     ng-disabled="tuning.dyno.busy" aria-label="Tuning goal"
-                     aria-valuetext="{{ ['Acceleration', 'Balanced', 'Top speed'][tuning.dyno.goal] }}">
-              <div class="dyno-goal-labels" aria-hidden="true"><span>Acceleration</span><span>Balanced</span><span>Top speed</span></div>
-            </div>
             <label class="dyno-gearing">
-              <input type="checkbox" ng-model="tuning.dyno.optimizeGearing" ng-change="setGoal()" ng-disabled="tuning.dyno.busy">
+              <input type="checkbox" ng-model="tuning.dyno.optimizeGearing" ng-disabled="tuning.dyno.busy">
               Optimize gearing &amp; shift spacing
             </label>
             <button type="button" class="profile-action-btn" ng-click="optimizeDyno()" ng-disabled="tuning.dyno.busy">
               {{ tuning.dyno.busy ? 'Tuning…' : (tuning.dyno.optimizeGearing ? 'Auto-tune ECU, turbo &amp; gearing' : 'Auto-tune ECU &amp; turbo') }}
             </button>
           </div>
-          <p class="muted">Power first, then two goal-tuning passes, then more power only if no times or speeds get worse.</p>
+          <p class="muted">{{ tuning.dyno.strategy }}</p>
+          <p class="muted">Auto-tune builds usable power across the event's RPM band, not just peak horsepower, then refines shift recovery and performance. Band gains can trade off peak HP or straight-line times; review Saved / Edited before applying. Final refinement cannot worsen the resulting times or speeds. Event RPM targets are editor heuristics, not lap-time or drift simulations. Auto-tune uses independent save-only points regardless of the cheat checkbox.</p>
           <p class="muted" ng-if="tuning.dyno.optimizeGearing">
-            Balances every shift's power band and RPM spacing with your selected goal.
+            Balances every shift's power band and RPM spacing for the selected event.
           </p>
+          <div class="dyno-body">
+          <section class="dyno-curve" ng-if="tuning.dyno.curveTabs.length">
+            <div class="dyno-setups" role="tablist" aria-label="Tuning curves">
+              <button type="button" role="tab" ng-repeat="tab in tuning.dyno.curveTabs track by tab.kind"
+                      ng-class="{ active: tuning.dyno.curve === tab.kind }"
+                      ng-attr-aria-selected="{{ tuning.dyno.curve === tab.kind ? 'true' : 'false' }}"
+                      ng-click="selectCurve(tab.kind)">{{ tab.label }}</button>
+            </div>
+            <div class="dyno-legend" aria-hidden="true" ng-if="tuning.dyno.chart">
+              <span><i class="legend-range"></i>Min–max</span><span><i class="legend-stock"></i>Stock</span><span><i class="legend-value"></i>Current</span><span><i class="legend-eff"></i>In game</span>
+            </div>
+            <label class="dyno-toggle" ng-if="tuning.dyno.chart">
+              <input type="checkbox" ng-model="tuning.dyno.cheat" ng-disabled="tuning.dyno.busy">
+              Cheat limits (save-only): set each point on its own
+            </label>
+            <div class="dyno-legend" aria-hidden="true" ng-if="tuning.dyno.drive">
+              <span><i class="legend-gear-on"></i>Range up to current</span><span><i class="legend-gear-off"></i>Rest of range</span><span><i class="legend-stock"></i>Stock</span>
+            </div>
+            <div class="dyno-drive" ng-if="tuning.dyno.drive" tabindex="0" role="listbox"
+                 aria-label="Gear ratios. Up and down select a row; left and right change it."
+                 ng-keydown="gearKey($event)">
+              <div class="dyno-gear dyno-gear-scale" aria-hidden="true">
+                <span></span><span class="muted">km/h</span>
+                <div class="dyno-gear-ticks">
+                  <span ng-repeat="tick in tuning.dyno.drive.ticks track by $index" ng-style="{ left: tick.at + '%' }">{{ tick.label }}</span>
+                </div>
+              </div>
+              <div class="dyno-gear" ng-repeat="row in tuning.dyno.drive.rows track by row.param"
+                   ng-class="{ selected: tuning.dyno.gear === $index, final: row.final }"
+                   role="option" ng-attr-aria-selected="{{ tuning.dyno.gear === $index ? 'true' : 'false' }}"
+                   ng-click="selectGear($index)">
+                <span class="dyno-gear-label">{{ row.label }}</span>
+                <span class="dyno-gear-value">{{ row.value }} <small class="muted">{{ row.sub }}</small></span>
+                <div class="dyno-gear-bar" ng-mousedown="gearPointer($event, $index, true)" ng-mousemove="gearPointer($event, $index, false)">
+                  <span class="dyno-gear-on" ng-style="{ left: row.lo + '%', width: (row.at - row.lo) + '%' }"></span>
+                  <span class="dyno-gear-off" ng-style="{ left: row.at + '%', width: (row.hi - row.at) + '%' }"></span>
+                  <span class="dyno-gear-stock" ng-style="{ left: row.stock + '%' }"></span>
+                  <span class="dyno-gear-dot" ng-style="{ left: row.at + '%' }"></span>
+                  <span class="dyno-gear-ends" ng-if="row.final" aria-hidden="true"><span>Top speed</span><span>Acceleration</span></span>
+                </div>
+              </div>
+            </div>
+            <div class="dyno-point" ng-if="tuning.dyno.drive">
+              <strong>{{ tuning.dyno.drive.selected.label }}</strong>
+              <button type="button" class="profile-action-btn" aria-label="{{ tuning.dyno.drive.selected.downLabel }}" title="{{ tuning.dyno.drive.selected.downLabel }}"
+                      ng-click="stepGear(-1)" ng-disabled="tuning.dyno.busy || !tuning.dyno.drive.selected.canDown">−</button>
+              <span>{{ tuning.dyno.drive.selected.value }}</span>
+              <button type="button" class="profile-action-btn" aria-label="{{ tuning.dyno.drive.selected.upLabel }}" title="{{ tuning.dyno.drive.selected.upLabel }}"
+                      ng-click="stepGear(1)" ng-disabled="tuning.dyno.busy || !tuning.dyno.drive.selected.canUp">+</button>
+              <span class="muted">stock {{ tuning.dyno.drive.selected.stock }} · range {{ tuning.dyno.drive.selected.range }}</span>
+              <button type="button" class="profile-action-btn" ng-click="resetCurve()" ng-disabled="tuning.dyno.busy">Reset to default</button>
+            </div>
+            <p class="muted" ng-if="tuning.dyno.drive">
+              Like the game's Gear Ratios screen: gear speeds are at the rev limiter with the current final drive. Click or drag a bar, or focus the list and use the arrow keys (Shift for bigger steps). Moving a gear pushes its neighbours to keep a 0.05 ratio gap. Ranges come from the installed transmission parts; the game clamps anything outside them when it loads the save.
+            </p>
+            <svg class="dyno-graph" tabindex="0" role="img" ng-if="tuning.dyno.chart"
+                 ng-attr-view_box="0 0 {{ tuning.dyno.chart.width }} {{ tuning.dyno.chart.height }}"
+                 aria-label="{{ tuning.dyno.curve === 'ecu' ? 'ECU' : 'Turbo' }} torque graph. Left and right select an RPM point; up and down change it."
+                 ng-mousedown="curvePointer($event, true)" ng-mousemove="curvePointer($event, false)" ng-keydown="curveKey($event)">
+              <g class="dyno-grid">
+                <line ng-repeat="tick in tuning.dyno.chart.ticks track by $index"
+                      ng-attr-x1="{{ tuning.dyno.chart.left }}" ng-attr-x2="{{ tuning.dyno.chart.width - 8 }}"
+                      ng-attr-y1="{{ tick.y }}" ng-attr-y2="{{ tick.y }}"></line>
+                <text ng-repeat="tick in tuning.dyno.chart.ticks track by $index" class="dyno-axis"
+                      ng-attr-x="{{ tuning.dyno.chart.left - 6 }}" ng-attr-y="{{ tick.y + 4 }}" text-anchor="end">{{ tick.label }}</text>
+              </g>
+              <g ng-repeat="col in tuning.dyno.chart.columns track by col.index"
+                 ng-class="{ selected: tuning.dyno.point === col.index }" class="dyno-col">
+                <rect class="dyno-col-bg" ng-attr-x="{{ col.x }}" ng-attr-y="{{ tuning.dyno.chart.top }}"
+                      ng-attr-width="{{ col.width }}" ng-attr-height="{{ tuning.dyno.chart.bottom - tuning.dyno.chart.top }}"></rect>
+                <rect class="dyno-range" ng-attr-x="{{ col.x + 3 }}" ng-attr-y="{{ col.rangeY }}"
+                      ng-attr-width="{{ col.width - 6 }}" ng-attr-height="{{ col.rangeH }}"></rect>
+                <rect class="dyno-value-bar" ng-attr-x="{{ col.x + 3 }}" ng-attr-y="{{ col.valueY }}"
+                      ng-attr-width="{{ col.width - 6 }}" ng-attr-height="{{ col.valueH }}"></rect>
+                <line class="dyno-stock" ng-attr-x1="{{ col.x + 3 }}" ng-attr-x2="{{ col.x + col.width - 3 }}"
+                      ng-attr-y1="{{ col.stockY }}" ng-attr-y2="{{ col.stockY }}"></line>
+                <circle class="dyno-dot" ng-attr-cx="{{ col.x + col.width / 2 }}" ng-attr-cy="{{ col.valueY }}" r="5"></circle>
+                <line class="dyno-eff" ng-if="col.effY < col.valueY - 0.5 || col.effY > col.valueY + 0.5"
+                      ng-attr-x1="{{ col.x + 6 }}" ng-attr-x2="{{ col.x + col.width - 6 }}"
+                      ng-attr-y1="{{ col.effY }}" ng-attr-y2="{{ col.effY }}"></line>
+                <text class="dyno-axis" ng-attr-x="{{ col.x + col.width / 2 }}" ng-attr-y="{{ tuning.dyno.chart.bottom + 16 }}"
+                      text-anchor="middle">{{ col.rpmLabel }}</text>
+              </g>
+              <text class="dyno-axis" ng-attr-x="{{ tuning.dyno.chart.width - 8 }}" ng-attr-y="{{ tuning.dyno.chart.height - 4 }}"
+                    text-anchor="end">RPM</text>
+            </svg>
+            <div class="dyno-point" ng-if="tuning.dyno.chart">
+              <strong>{{ tuning.dyno.chart.selected.rpm }}</strong>
+              <button type="button" class="profile-action-btn" aria-label="Lower point" ng-click="stepPoint(-1)"
+                      ng-disabled="tuning.dyno.busy || !tuning.dyno.chart.selected.canDown">−</button>
+              <span>{{ tuning.dyno.chart.selected.value }}</span>
+              <button type="button" class="profile-action-btn" aria-label="Raise point" ng-click="stepPoint(1)"
+                      ng-disabled="tuning.dyno.busy || !tuning.dyno.chart.selected.canUp">+</button>
+              <span class="muted">{{ tuning.dyno.chart.selected.change }} ({{ tuning.dyno.chart.selected.stock }}) · range {{ tuning.dyno.chart.selected.range }}</span>
+              <span ng-if="tuning.dyno.chart.selected.effective" ng-class="{ 'dyno-beyond': tuning.dyno.chart.selected.beyond }">In game {{ tuning.dyno.chart.selected.effective }}</span>
+              <button type="button" class="profile-action-btn" ng-click="resetCurve()" ng-disabled="tuning.dyno.busy">Reset to default</button>
+            </div>
+            <p class="muted" ng-if="tuning.dyno.chart && !tuning.dyno.cheat">Click or drag a column, or focus the graph and use the arrow keys (Shift for bigger steps). Like the game's tuning screen, raising a point also lifts its direct neighbours and lowers the points further away, so the curve's total torque stays the same.</p>
+            <p class="muted" ng-if="tuning.dyno.chart && tuning.dyno.cheat">Cheat limits: each point is saved on its own, which the game's screen never does. On load, the game restores total engine torque with an equal offset at every RPM; this appears in ECU, not the turbo component. Lowering some points can push others past their maximum.</p>
+            <p class="muted" ng-if="tuning.dyno.chart">"In game" marks read the final loaded ECU or turbo component, including unique parts. ECU's equal load correction moves its marks in parallel, not proportionally; turbo receives no such correction. The result table uses combined engine torque.</p>
+          </section>
+          <div class="dyno-stats">
           <table class="dyno-table">
             <thead>
-              <tr><th></th><th>Current</th><th ng-if="tuning.dyno.hasProposal">Auto-tuned</th></tr>
+              <tr><th></th><th>Saved</th><th ng-if="tuning.dyno.hasProposal">Edited</th></tr>
             </thead>
             <tbody>
               <tr ng-repeat="row in tuning.dyno.rows track by row.label">
@@ -209,8 +314,11 @@
             </tbody>
           </table>
           <div class="bike-actions" ng-if="tuning.dyno.hasProposal">
-            <button type="button" class="profile-action-btn" ng-click="applyDyno()">Apply to {{ tuning.dyno.setupNames[tuning.dyno.setup] }} setup</button>
-            <span class="muted">{{ tuning.dyno.optimizeGearing ? 'ECU, turbo and eligible gearing settings change.' : 'Only the ECU and turbo curves change.' }}</span>
+            <button type="button" class="profile-action-btn" ng-click="applyDyno()" ng-disabled="tuning.dyno.busy">Apply to {{ tuning.dyno.setupNames[tuning.dyno.setup] }} setup</button>
+            <button type="button" class="profile-action-btn" ng-click="discardDyno()" ng-disabled="tuning.dyno.busy">Discard changes</button>
+            <span class="muted">Not saved until applied.</span>
+          </div>
+          </div>
           </div>
         </div>
       </div>

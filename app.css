@@ -113,9 +113,6 @@
 .dyno-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 10px; }
 .dyno-controls label { display: flex; align-items: center; gap: 6px; margin: 0; }
 .dyno-gearing input { width: 16px; height: 16px; accent-color: var(--color-primary); }
-.dyno-goal { width: 280px; max-width: 100%; }
-.dyno-goal input { width: 100%; accent-color: var(--color-primary); }
-.dyno-goal-labels { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--color-text-muted); }
 .dyno-controls strong { margin-right: auto; color: var(--color-text-strong); letter-spacing: .04em; }
 
 .dyno-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; font-variant-numeric: tabular-nums; }
@@ -129,6 +126,77 @@
 .dyno-value { display: inline-block; min-width: 6.5em; }
 .dyno-value + .dyno-value { color: var(--color-text-muted); }
 .dyno-table td.better .dyno-value + .dyno-value { color: inherit; opacity: .75; }
+
+.dyno-curve { border: 1px solid var(--color-border); background: var(--color-surface); padding: 10px; }
+.dyno-curve .dyno-setups { margin-bottom: 6px; }
+.dyno-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 11px; color: var(--color-text-muted); margin-bottom: 4px; }
+.dyno-legend i { display: inline-block; width: 12px; height: 8px; margin-right: 5px; vertical-align: middle; }
+.dyno-legend .legend-range { background: rgba(255, 90, 80, .35); border: 1px solid #ff5a50; }
+.dyno-legend .legend-stock { height: 2px; background: #ffd34d; }
+.dyno-legend .legend-value { background: rgba(80, 200, 200, .55); }
+.dyno-legend .legend-gear-on { background: rgba(90, 200, 110, .7); }
+.dyno-legend .legend-gear-off { background: rgba(255, 90, 80, .45); }
+.dyno-legend .legend-eff { height: 0; border-top: 2px dashed #c58bff; }
+.dyno-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; margin: 2px 0 6px; cursor: pointer; }
+.dyno-eff { stroke: #c58bff; stroke-width: 2; stroke-dasharray: 4 3; pointer-events: none; }
+.dyno-point .dyno-beyond { color: #c58bff; }
+.dyno-graph { display: block; width: 100%; max-width: 720px; height: auto; cursor: ns-resize; user-select: none; touch-action: none; }
+.dyno-graph:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.dyno-grid line { stroke: var(--color-border); stroke-width: 1; }
+.dyno-axis { fill: var(--color-text-muted); font-size: 11px; font-family: inherit; }
+.dyno-col-bg { fill: transparent; }
+.dyno-col.selected .dyno-col-bg { fill: rgba(90, 140, 255, .14); }
+.dyno-range { fill: rgba(255, 90, 80, .18); stroke: rgba(255, 90, 80, .7); stroke-width: 1; }
+.dyno-value-bar { fill: rgba(80, 200, 200, .35); }
+.dyno-col.selected .dyno-value-bar { fill: rgba(80, 200, 200, .55); }
+.dyno-stock { stroke: #ffd34d; stroke-width: 2; }
+.dyno-dot { fill: #fff; stroke: #0d0d0d; stroke-width: 1.5; }
+.dyno-col.selected .dyno-dot { fill: var(--color-primary); }
+.dyno-point { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; font-variant-numeric: tabular-nums; }
+.dyno-point strong { min-width: 6.5em; color: var(--color-text-strong); }
+.dyno-point > span:not(.muted) { min-width: 5.5em; text-align: center; color: var(--color-text-strong); }
+.dyno-point .muted { font-size: 12px; }
+.dyno-point .profile-action-btn:last-child { margin-left: auto; }
+
+/* Large screens: graph and stats side by side so the dialog does not need to scroll as far. */
+.dyno-body { display: flex; flex-direction: column; gap: 12px; }
+@media (min-width: 1200px) {
+  .tuning-dialog.tuning-dialog-dyno { width: min(100%, 1240px); max-height: 94dvh; }
+  .dyno-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(330px, 400px); align-items: start; }
+  .dyno-body > .dyno-stats { grid-column: 2; position: sticky; top: 0; }
+  .dyno-stats .dyno-table th, .dyno-stats .dyno-table td { padding: 5px 6px; }
+  .dyno-stats .dyno-value { min-width: 0; display: block; }
+  .dyno-stats .bike-actions { flex-wrap: wrap; }
+}
+
+/* Drivetrain: game-style gear ratio bars (green up to the current value, red to the range end). */
+.dyno-drive { display: flex; flex-direction: column; gap: 2px; max-width: 720px; user-select: none; }
+.dyno-drive:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.dyno-gear {
+  display: grid; grid-template-columns: 7.5em 9.5em 1fr; align-items: center; gap: 10px;
+  padding: 5px 6px; cursor: pointer; font-variant-numeric: tabular-nums;
+}
+.dyno-gear.selected { background: rgba(90, 140, 255, .14); }
+.dyno-gear.final { margin-top: 6px; border-top: 1px solid var(--color-border); padding-top: 10px; }
+.dyno-gear-value { color: var(--color-text-strong); }
+.dyno-gear-bar { position: relative; height: 12px; background: rgba(255, 255, 255, .06); cursor: ew-resize; touch-action: none; }
+.dyno-gear.final .dyno-gear-bar { margin-bottom: 14px; }
+.dyno-gear-on, .dyno-gear-off { position: absolute; top: 0; bottom: 0; }
+.dyno-gear-on { background: rgba(90, 200, 110, .7); }
+.dyno-gear-off { background: rgba(255, 90, 80, .45); }
+.dyno-gear-stock { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: #ffd34d; }
+.dyno-gear-dot {
+  position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%;
+  background: #fff; border: 1.5px solid #0d0d0d;
+}
+.dyno-gear.selected .dyno-gear-dot { background: var(--color-primary); }
+.dyno-gear-ends {
+  position: absolute; top: 100%; left: 0; right: 0; display: flex; justify-content: space-between;
+  font-size: 11px; color: var(--color-text-muted); padding-top: 2px;
+}
+.dyno-gear-scale { cursor: default; padding-top: 0; }
+.dyno-gear-ticks { position: relative; height: 14px; font-size: 11px; color: var(--color-text-muted); }
+.dyno-gear-ticks span { position: absolute; transform: translateX(-50%); }
 
 @media (max-width: 560px) {
   .tuning-layout { grid-template-columns: 1fr; }

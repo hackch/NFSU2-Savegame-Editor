@@ -3,8 +3,8 @@ import type { Donor } from './cars.js';
 /** What a car slot shows: locked, unlocked with no car bought (open for a sponsor car), or filled with a bought car. */
 export type SlotState = 'locked' | 'open' | 'filled';
 import {
-  dataView, bytesToHex, slotBase, SLOT_BASE, SLOT_COUNT, SLOT_STRIDE, SLOT_USED_OFF, SLOT_HEADER_LEN, CAR_KEY_REL, CAR_TYPE_HASH_REL,
-  SLOT_LINK_OFF, SLOT_LINK_LEN, SLOT_LOCK_REL, SLOT_BOUGHT_REL, GARAGE_CAR_COUNT, GARAGE_CAR_MAX, PERF_OFF,
+  dataView, bytesToHex, checkedSlotBase, slotBase, slotCount, SLOT_BASE, SLOT_COUNT, SLOT_USED_OFF, SLOT_HEADER_LEN, CAR_KEY_REL, CAR_TYPE_HASH_REL,
+  SLOT_LINK_OFF, SLOT_LINK_LEN, SLOT_LOCK_REL, SLOT_BOUGHT_REL, SLOT_RECORD_END_REL, GARAGE_CAR_COUNT, GARAGE_CAR_MAX, PERF_OFF,
 } from './layout.js';
 import { PERF_COUNT } from './perf.js';
 import { TRAFFIC_CARS } from '../data/traffic-cars.js';
@@ -37,7 +37,7 @@ export function getCarTypeHash(data: Uint8Array, slot: number): number {
 
 /** Experimental identity-only edit; traffic body/customization data is not mapped. */
 export function setSlotTrafficCar(data: Uint8Array, slot: number, hash: number): Uint8Array {
-  const base = slotBase(slot);
+  const base = checkedSlotBase(data, slot);
   if (!TRAFFIC_CARS.some((car) => car.hash === hash)) throw new RangeError('Unknown traffic vehicle.');
   if (slotState(data, slot) !== 'filled' || !isSlotUsed(data, slot)) {
     throw new RangeError('Traffic experiments require an unlocked, filled car slot.');
@@ -97,7 +97,7 @@ export function slotState(data: Uint8Array, slot: number): SlotState {
  * @returns The slot index, or -1.
  */
 function findOtherSlot(data: Uint8Array, slot: number, predicate: (d: Uint8Array, i: number) => boolean): number {
-  for (let i = 0; i < SLOT_COUNT; i++) {
+  for (let i = 0; i < slotCount(data); i++) {
     if (i !== slot && predicate(data, i)) return i;
   }
   return -1;
@@ -107,7 +107,7 @@ function findOtherSlot(data: Uint8Array, slot: number, predicate: (d: Uint8Array
  * Writes a donor car into a slot.
  * Donor blocks are written in order, and the slot's part flags are reset to stock.
  * Name and money are kept. An empty slot also gets the used header and link block copied from another slot.
- * The slot's lock flag is cleared and its bought flag is set, and the garage count (0xA175) is raised as before.
+ * The slot's lock flag is cleared and its bought flag is set. Career slots 1-5 also raise the garage count (0xA175) as before.
  * @param data Save bytes. Not mutated.
  * @param slot Target slot.
  * @param donor Car to write.
@@ -115,7 +115,7 @@ function findOtherSlot(data: Uint8Array, slot: number, predicate: (d: Uint8Array
  * @throws RangeError when no slot is in use to copy a header from, or a donor block does not fit.
  */
 export function setSlotCar(data: Uint8Array, slot: number, donor: Donor): Uint8Array {
-  const base = slotBase(slot);
+  const base = checkedSlotBase(data, slot);
   const needsHeader = !isSlotUsed(data, slot);
   const needsLink = !isSlotLinked(data, slot);
   const headerTemplate = needsHeader ? findOtherSlot(data, slot, isSlotUsed) : -1;
@@ -123,7 +123,7 @@ export function setSlotCar(data: Uint8Array, slot: number, donor: Donor): Uint8A
   const linkTemplate = needsLink ? findOtherSlot(data, slot, isSlotLinked) : -1;
   for (const block of donor.blocks) {
     const rel = block.off - SLOT_BASE;
-    if (rel < 0 || rel + block.bytes.length > SLOT_STRIDE) {
+    if (rel < 0 || rel + block.bytes.length > SLOT_RECORD_END_REL) {
       throw new RangeError('Donor block does not fit inside a car slot.');
     }
   }
@@ -143,7 +143,7 @@ export function setSlotCar(data: Uint8Array, slot: number, donor: Donor): Uint8A
     const link = data.slice(slotBase(linkTemplate) + SLOT_LINK_OFF, slotBase(linkTemplate) + SLOT_LINK_OFF + SLOT_LINK_LEN);
     out.set(link, base + SLOT_LINK_OFF);
   }
-  out[GARAGE_CAR_COUNT] = Math.max(out[GARAGE_CAR_COUNT], Math.min(slot + 1, GARAGE_CAR_MAX));
+  if (slot < SLOT_COUNT) out[GARAGE_CAR_COUNT] = Math.max(out[GARAGE_CAR_COUNT], Math.min(slot + 1, GARAGE_CAR_MAX));
   return out;
 }
 
@@ -156,25 +156,25 @@ export function setSlotCar(data: Uint8Array, slot: number, donor: Donor): Uint8A
  */
 export function setSlotLocked(data: Uint8Array, slot: number, locked: boolean): Uint8Array {
   const out = data.slice();
-  out[slotBase(slot) + SLOT_LOCK_REL] = locked ? 1 : 0;
+  out[checkedSlotBase(data, slot) + SLOT_LOCK_REL] = locked ? 1 : 0;
   return out;
 }
 
 /**
- * Copies a whole slot block to another slot and back.
+ * Exchanges the car data of two native records while each slot keeps its own `CAREER_SLOT_<n>` handle.
  * Experimental: cross-references elsewhere in the save are not updated.
  * @param data Save bytes. Not mutated.
  * @param slotA First slot.
  * @param slotB Second slot.
- * @returns A new array with the two slot blocks exchanged.
+ * @returns A new array with the two slots' car data exchanged.
  */
 export function swapSlots(data: Uint8Array, slotA: number, slotB: number): Uint8Array {
+  const a = checkedSlotBase(data, slotA);
+  const b = checkedSlotBase(data, slotB);
   if (slotA === slotB) return data.slice();
   const out = data.slice();
-  const a = slotBase(slotA);
-  const b = slotBase(slotB);
-  const blockA = data.slice(a, a + SLOT_STRIDE);
-  out.set(data.subarray(b, b + SLOT_STRIDE), a);
+  const blockA = data.slice(a, a + SLOT_RECORD_END_REL);
+  out.set(data.subarray(b, b + SLOT_RECORD_END_REL), a);
   out.set(blockA, b);
   return out;
 }
