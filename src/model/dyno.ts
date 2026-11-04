@@ -1155,25 +1155,51 @@ function torqueTable(p: Phys): { tab: number[]; idle: number; inv: number } {
   return { tab: Array.from({ length: 9 }, (_, i) => g(p, 0x200 + 4 * i)), idle, inv: 8 / (g(p, 0x1f8) - idle) };
 }
 
+// Single-precision port of FUN_005b06a0 in the game's operation order. The game keeps every state variable
+// (speed, distance, time, shift counter) in float32 and runs the x87 at 24-bit precision, so each operation
+// rounds to float32. Differences to a double simulation: the shift counter (+-1/60 * 3 / 1.5) reaches
+// 0.99999994 instead of 1.0 after 40 recovery steps, which costs one extra cut/power frame pair per gear
+// change, and the cut branch requires counter > 0 (not >= 0).
+const fr = Math.fround;
+
+function interp32(table: ArrayLike<number>, x0: number, invDx: number, x: number): number {
+  const t = fr(fr(x - x0) * invDx);
+  const i = Math.trunc(t);
+  if (i < 0 || !(t >= 0)) return table[0];
+  if (i >= table.length - 1) return table[table.length - 1];
+  const f = fr(t - i);
+  return fr(fr(f * table[i + 1]) + fr(fr(1 - f) * table[i]));
+}
+
 function dragSim(p: Phys, carIndex: number): Pick<DynoResult, 't60' | 't100' | 'quarterMile' | 'trapSpeed' | 'quarterExact'> {
-  const { tab, idle, inv } = torqueTable(p);
-  const { fd, invR } = drive(p);
-  const sh = shiftPoints(p);
-  const mass = g(p, 0x110), k = g(p, 0x260);
-  const gears = Array.from({ length: p.gearCount }, (_, i) => g(p, 0x1d8 + 4 * i));
+  const G = (o: number): number => fr(g(p, o));
+  const tab = Array.from({ length: 9 }, (_, i) => G(0x200 + 4 * i));
+  const idle = G(0x1f0), red = G(0x1f8), shift = G(0x1f4);
+  const inv = fr(8 / fr(red - idle));
+  const bias = G(0x1c0), nb = fr(1 - bias);
+  const fd = fr(fr(bias * G(0x1bc)) + fr(nb * G(0x1b8)));
+  const invR = fr(1 / fr(fr(nb * G(0x20)) + fr(bias * G(0x80))));
+  const n = p.gearCount;
+  const sh: number[] = [];
+  for (let k = 2; k <= n; k++) sh[k] = fr(shift - 100);
+  sh[n + 1] = fr(red + 500);
+  const mass = G(0x110), k = G(0x260);
+  const gears = Array.from({ length: n }, (_, i) => G(0x1d8 + 4 * i));
+  const dt = fr(1 / 60), mph = fr(MPH), cut = [fr(-3), 0, fr(1.5)];
   let gear = 0, v = 0, x = 0, t = 0, c = 1, phase = 1, just = false;
-  let t60 = Infinity, t100 = Infinity, qm = Infinity, trap = 0, qmExact = Infinity;
-  for (let step = 0; step < 60 * 120; step++) {
+  let t60 = 0, t100 = 0, qm = 0, trap = 0, qmExact = Infinity;
+  for (let step = 0; step < 0xf423f; step++) {
     const gr = gears[gear] ?? 0;
-    const rpm = invR * v * gr * fd * 9.5493;
+    const rpm = fr(fr(fr(fr(invR * v) * gr) * fd) * fr(9.549304));
     let a: number;
-    if (just || !((sh[gear + 2] ?? Infinity) - 100 < rpm)) {
+    const thr = sh[gear + 2] === undefined ? NaN : fr(-100 + sh[gear + 2]);
+    if (just || !(thr < rpm)) {
       just = false;
-      a = interp(tab, idle, inv, rpm) * gr * fd * invR / mass;
+      a = fr(fr(fr(fr(interp32(tab, idle, inv, rpm) * gr) * fd) * invR) / mass);
     } else {
       just = true;
-      c += DT * (phase ? -3 : 1.5);
-      if (c >= 0) {
+      c = fr(fr(dt * cut[phase ? 0 : 2]) + c);
+      if (c > 0) {
         just = c < 1;
         if (!just) { gear++; c = 1; phase = 1; }
       } else {
@@ -1181,19 +1207,20 @@ function dragSim(p: Phys, carIndex: number): Pick<DynoResult, 't60' | 't100' | '
       }
       a = 0;
     }
-    t += DT;
-    const dv = (a - v * k * v / mass) * DT;
-    x += (0.5 * dv + v) * DT;
-    v += dv;
-    if (t60 === Infinity && v * MPH >= 60) t60 = t * (F60[carIndex] ?? 0);
-    if (t100 === Infinity && v * MPH >= 100) t100 = t * (F100[carIndex] ?? 0);
-    if (qm === Infinity && x >= QUARTER_MILE_M) {
-      qm = t; trap = v * MPH;
+    t = fr(dt + t);
+    const dv = fr(fr(a - fr(fr(fr(v * k) * v) / mass)) * dt);
+    x = fr(fr(fr(fr(0.5 * dv) + v) * dt) + x);
+    v = fr(dv + v);
+    if (t60 === 0 && 60 <= fr(v * mph)) t60 = fr(t * fr(F60[carIndex] ?? 0));
+    if (t100 === 0 && 100 <= fr(v * mph)) t100 = fr(t * fr(F100[carIndex] ?? 0));
+    if (qm === 0 && QUARTER_MILE_M <= x) {
+      qm = t; trap = v;
       qmExact = t - (x - QUARTER_MILE_M) / Math.max(v, 1e-6);
     }
-    if (t60 !== Infinity && t100 !== Infinity && qm !== Infinity) break;
+    if (t60 !== 0 && t100 !== 0 && qm !== 0 && trap !== 0) break;
   }
-  return { t60, t100, quarterMile: qm, trapSpeed: trap, quarterExact: qmExact };
+  const z = (q: number): number => (q === 0 ? Infinity : q);
+  return { t60: z(t60), t100: z(t100), quarterMile: z(qm), trapSpeed: trap * MPH, quarterExact: qmExact };
 }
 
 function topSpeed(p: Phys): number {
