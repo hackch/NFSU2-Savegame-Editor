@@ -463,7 +463,8 @@ export class DynoModel {
     }
     ({ f, out } = this.fraction(1, 3));
     if (f) {
-      const lvl = Math.trunc(out[0] * 3 + 0.5);
+      // FUN_005a6bd0 picks the gear set from the third transmission fraction, not the first.
+      const lvl = Math.trunc(out[2] * 3 + 0.5);
       if (lvl >= 1 && lvl <= 3) {
         const gs = 0x310 + lvl * 0x40;
         s(p, 0x1b8, R(c, gs + 8)); s(p, 0x1bc, R(c, gs + 0xc)); s(p, 0x1c0, R(c, gs + 0x10));
