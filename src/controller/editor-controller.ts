@@ -14,24 +14,27 @@ import {
 import { countUnlocked, setUnlocks, UNLOCK_COUNT } from '../model/unlocks.js';
 import { TRAFFIC_CARS } from '../data/traffic-cars.js';
 import { setSlotTrafficCar } from '../model/slots.js';
+import { colorPalettes, isVisualColorSlot, parseVisualData, readVisual, VISUAL_SLOTS, VisualCatalog } from '../model/visual.js';
 import {
   CURVE_POINTS, DynoModel, ECU_OFF, findCar, KW_TO_HP, MPH_TO_KMH, NEUTRAL_BYTE, NM_TO_LBFT, optimizeDynoSetup, parseGameData,
   readSlotDyno, setSetupTuning, SETUP_NAMES, SETUP_SIZE, TURBO_OFF,
-  type CurveKind, type CurvePoint, type DynoEvent, type DynoResult, type GameData, type Gearing, type TuningBand,
+  type CurveKind, type CurvePoint, type DynoEvent, type DynoResult, type GameData, type Gearing, type ScalarRow, type TuningBand,
 } from '../model/dyno.js';
 import type {
-  CategoryView, CurveChart, DynoCell, DynoRow, DynoTab, EditorScope, GearChart, PartView, SlotView, Status, TuningTab, UniquePartView,
+  CategoryView, CurveChart, DynoCell, DynoRow, DynoTab, EditorScope, GearChart, PartView, SlotView, Status, TuningTab, UniquePartView, VisualRow,
 } from './editor-scope.js';
 
 const partsByIndex = new Map<number, PerfPart>(PERF_PARTS.map((p) => [p.index, p]));
 const tuningPerfIndexSet = new Set(TUNING_PERF_INDICES);
 const CURVE_TABS: { kind: DynoTab; label: string }[] = [
   { kind: 'ecu', label: 'ECU' }, { kind: 'turbo', label: 'Turbo' }, { kind: 'drive', label: 'Drivetrain' },
+  { kind: 'suspension', label: 'Suspension' }, { kind: 'aerodynamics', label: 'Aerodynamics' },
+  { kind: 'tires-brakes', label: 'Tires & brakes' }, { kind: 'nitrous', label: 'Nitrous' },
 ];
 /** Speed scale of the game's gear ratio bars. */
 const GEAR_SCALE_KMH = 420;
 
-/** Top-level tuning tabs use the creator's category names. Only PERF has its part table mapped. */
+/** Top-level tuning tabs use the creator's category names. */
 const TUNING_TABS: TuningTab[] = [
   { code: 'PERF', label: 'PERFORMANCE' },
   { code: 'BODY', label: 'BODY PARTS' },
@@ -50,6 +53,8 @@ export function EditorController($scope: EditorScope): void {
   let donors: Donor[] = [];
   let donorIndex = new Map<number, Donor>();
   let game: GameData | null = null;
+  let visuals: VisualCatalog | null = null;
+  let visualDraft: Uint8Array | null = null;
   /** Unapplied dyno setups by `slot:setup`; Auto-tune and graph edits both change them. */
   const drafts = new Map<string, { bytes: Uint8Array; band: TuningBand }>();
   let backup: { zip: ZipArchive; profiles: BackupProfile[]; work: Map<number, Uint8Array>; current: number } | null = null;
@@ -81,10 +86,11 @@ export function EditorController($scope: EditorScope): void {
     tab: 'PERF',
     sub: TUNING_PERF_CATEGORIES[0].code,
     categories: [],
+    visual: { blocked: '', hasProposal: false, category: '', colorSlot: 63, groups: [] },
     dyno: {
       gameName: '', gameError: '', setup: 1, setupNames: SETUP_NAMES, strategy: '', optimizeGearing: false,
       carName: '', blocked: '', busy: false, rows: [], hasProposal: false,
-      curveTabs: [], curve: 'ecu', cheat: false, point: 0, chart: null, gear: 0, drive: null,
+      curveTabs: [], curve: 'ecu', cheat: false, point: 0, chart: null, gear: 0, drive: null, scalars: [],
     },
   };
 
@@ -141,6 +147,7 @@ export function EditorController($scope: EditorScope): void {
     if ($scope.tuning.open) {
       rebuildTuning();
       rebuildDyno();
+      rebuildVisual();
     }
   }
 
@@ -181,6 +188,46 @@ export function EditorController($scope: EditorScope): void {
     });
   }
 
+  function rebuildVisual(): void {
+    const view = $scope.tuning.visual;
+    view.groups = [];
+    view.hasProposal = !!visualDraft;
+    view.blocked = '';
+    if (!data || !visuals) {
+      view.blocked = 'Load GLOBAL\\GLOBALB.BUN to list the parts for this car.';
+      return;
+    }
+    const slot = $scope.tuning.slot, bytes = visualDraft ?? data, car = getCarTypeHash(bytes, slot);
+    const refs = readVisual(bytes, slot);
+    const groups = new Map<string, VisualRow[]>();
+    for (const spec of VISUAL_SLOTS.filter((s) => s.tab === $scope.tuning.tab)) {
+      if (visuals.hidden(refs, car, spec.id)) continue;
+      const options = visuals.selectableOptions(car, spec.id);
+      if (!options.length && !refs[spec.id]) continue;
+      const current = visuals.part(car, spec.id, refs[spec.id]);
+      const retained = refs[spec.id] !== 0 && !options.some((p) => p.hash === refs[spec.id]);
+      const choices = options.map((p) => ({
+        hash: p.hash, label: p.name.replaceAll('_', ' '),
+        group: p.level === 0 ? 'Stock / shared' : `Level ${p.level}`,
+      }));
+      if (retained) choices.unshift({
+        hash: refs[spec.id], label: `${current?.name ?? `Unknown installed part (${hex(refs[spec.id], 8)})`} - retained`, group: 'Installed',
+      });
+      choices.unshift({ hash: 0, label: 'Default / none (resolved by game)', group: 'Default' });
+      const rows = groups.get(spec.category) ?? [];
+      rows.push({
+        id: spec.id, label: spec.label, value: refs[spec.id], color: current?.color ?? '', options: choices,
+        colorPicker: isVisualColorSlot(spec.id), palettes: isVisualColorSlot(spec.id) ? colorPalettes(options) : [],
+        selectedLabel: current?.name ?? (refs[spec.id] ? `Unknown installed part (${hex(refs[spec.id], 8)})` : 'Default / none'),
+        retained,
+      });
+      groups.set(spec.category, rows);
+    }
+    view.groups = [...groups].map(([label, rows]) => ({ label, rows }));
+    if (!groups.has(view.category)) view.category = view.groups[0]?.label ?? '';
+    if (!view.groups.length) view.blocked = 'No compatible parts in this game database for this car and menu.';
+  }
+
   /** Builds the dyno model of the open tuning slot, or explains why there is none. */
   function dynoModel(): { model: DynoModel; setups: Uint8Array[] } | { reason: string } {
     if (!data) return { reason: 'Load a save first.' };
@@ -192,8 +239,8 @@ export function EditorController($scope: EditorScope): void {
     const car = findCar(game, sd.hash);
     if (!car) return { reason: 'This car is not in the loaded game data.' };
     const model = new DynoModel(game, car, sd.installed, sd.uniques);
-    if (!model.ecuTunable && !model.turboTunable && !model.gearingParameters.length) {
-      return { reason: `${car.name}: install a tunable ECU, turbo or transmission package to unlock dyno tuning.` };
+    if (!model.ecuTunable && !model.turboTunable && !model.gearingParameters.length && !model.scalarTuning(sd.setups[0]).length) {
+      return { reason: `${car.name}: install tunable performance or body parts to unlock dyno tuning.` };
     }
     return { model, setups: sd.setups };
   }
@@ -209,7 +256,7 @@ export function EditorController($scope: EditorScope): void {
 
   function currentPoints(): CurvePoint[] | null {
     const built = dynoModel(), kind = $scope.tuning.dyno.curve;
-    return 'reason' in built || kind === 'drive' ? null : built.model.curve(currentSetup(built), kind);
+    return 'reason' in built || (kind !== 'ecu' && kind !== 'turbo') ? null : built.model.curve(currentSetup(built), kind);
   }
 
   function currentGearing(): { model: DynoModel; gearing: Gearing; bytes: Uint8Array } | null {
@@ -226,6 +273,7 @@ export function EditorController($scope: EditorScope): void {
     const current = currentSetup(built);
     const band = drafts.get(draftKey())?.band ?? built.model.tuningBand(current, $scope.tuning.dyno.setup);
     const bytes = edit(current.slice(), built.model);
+    if (sameBytes(bytes, current)) return;
     if (sameBytes(bytes, built.setups[$scope.tuning.dyno.setup])) drafts.delete(draftKey());
     else drafts.set(draftKey(), { bytes, band });
     rebuildDyno();
@@ -234,7 +282,7 @@ export function EditorController($scope: EditorScope): void {
   /** Edits the selected curve's bytes. */
   function editPoints(edit: (bytes: Uint8Array, off: number) => void): void {
     const kind = $scope.tuning.dyno.curve;
-    if (kind === 'drive') return;
+    if (kind !== 'ecu' && kind !== 'turbo') return;
     editSetup((bytes) => { edit(bytes, kind === 'ecu' ? ECU_OFF : TURBO_OFF); return bytes; });
   }
 
@@ -244,7 +292,7 @@ export function EditorController($scope: EditorScope): void {
    */
   function setCurvePoint(index: number, point: CurvePoint, byte: number): void {
     const kind = $scope.tuning.dyno.curve;
-    if (kind === 'drive') return;
+    if (kind !== 'ecu' && kind !== 'turbo') return;
     if (byte === point.byte) { rebuildDyno(); return; }
     if ($scope.tuning.dyno.cheat) editPoints((bytes, off) => { bytes[off + index] = byte; });
     else editSetup((bytes, model) => model.withCurvePoint(bytes, kind, index, DynoModel.curveValue(point, byte)));
@@ -262,6 +310,7 @@ export function EditorController($scope: EditorScope): void {
     view.curveTabs = [];
     view.chart = null;
     view.drive = null;
+    view.scalars = [];
     const built = dynoModel();
     if ('reason' in built) {
       view.blocked = built.reason;
@@ -285,17 +334,19 @@ export function EditorController($scope: EditorScope): void {
     });
     const gearing = built.model.gearing(bytes);
     const curves = { ecu: built.model.curve(bytes, 'ecu'), turbo: built.model.curve(bytes, 'turbo') };
-    view.curveTabs = CURVE_TABS.filter((tab) => (tab.kind === 'drive' ? gearing : curves[tab.kind]));
+    const scalars = built.model.scalarTuning(bytes);
+    view.curveTabs = CURVE_TABS.filter(({ kind }) => kind === 'drive' ? gearing :
+      kind === 'ecu' || kind === 'turbo' ? curves[kind] : scalars.some((row) => row.category === kind));
     if (view.curveTabs.length && !view.curveTabs.some((tab) => tab.kind === view.curve)) view.curve = view.curveTabs[0].kind;
     if (view.curve === 'drive') {
       if (gearing) {
         view.gear = Math.min(Math.max(view.gear, 0), gearing.rows.length - 1);
         view.drive = gearChart(gearing, view.gear);
       }
-    } else {
+    } else if (view.curve === 'ecu' || view.curve === 'turbo') {
       const points = curves[view.curve];
       view.chart = points ? curveChart(points, view.point) : null;
-    }
+    } else view.scalars = scalars.filter((row) => row.category === view.curve);
   }
 
   /** Career part of the working bytes; a 10-slot nfsu2-web buffer also contains GARAGE.DAT records. */
@@ -305,12 +356,15 @@ export function EditorController($scope: EditorScope): void {
 
   function resetEditor(): void {
     drafts.clear();
+    visualDraft = null;
     $scope.tuning.open = false;
     $scope.swapTarget = {};
     $scope.replaceTarget = {};
   }
 
   function showLoaded(bytes: Uint8Array, prefix = 'Loaded.'): void {
+    drafts.clear();
+    visualDraft = null;
     data = bytes;
     const checks = verifyChecksums(careerBytes(bytes));
     $scope.checks = checks;
@@ -369,8 +423,11 @@ export function EditorController($scope: EditorScope): void {
   /** Replaces the working bytes and re-renders. Other save edits discard unapplied dyno drafts. */
   function applyResult(next: Uint8Array, keepDrafts = false): void {
     data = next;
+    visualDraft = null;
     if (backup) backup.work.set(backup.current, next);
-    if (!keepDrafts) drafts.clear();
+    if (!keepDrafts) {
+      drafts.clear();
+    }
     refresh();
   }
 
@@ -461,13 +518,16 @@ export function EditorController($scope: EditorScope): void {
     $scope.tuning.sub = TUNING_PERF_CATEGORIES[0].code;
     $scope.tuning.dyno.point = 0;
     drafts.clear();
+    visualDraft = null;
     rebuildTuning();
     rebuildDyno();
+    rebuildVisual();
   };
 
   $scope.selectTab = function (code: string): void {
     $scope.tuning.tab = code;
     if (code === 'DYNO') rebuildDyno();
+    rebuildVisual();
   };
 
   $scope.selectSub = function (code: string): void {
@@ -566,7 +626,7 @@ export function EditorController($scope: EditorScope): void {
     const verb = $scope.slots[slot].used
       ? `Replace ${current} in slot ${slot + 1} with ${donor.name}?`
       : `Put ${donor.name} in empty slot ${slot + 1}?`;
-    if (!confirm(`${verb}\n\nOnly this slot's car blocks change. Installed parts are reset to stock. Empty slots use an unverified header.`)) {
+    if (!confirm(`${verb}\n\nOnly this slot changes. Appearance is reset; vinyls, decals and neon are cleared. Installed parts are reset to stock. Dyno tuning is kept.`)) {
       return;
     }
     try {
@@ -601,20 +661,73 @@ export function EditorController($scope: EditorScope): void {
     reader.onload = () => {
       $scope.$apply(() => {
         try {
-          game = parseGameData(new Uint8Array(reader.result as ArrayBuffer));
+          const bytes = new Uint8Array(reader.result as ArrayBuffer);
+          const nextGame = parseGameData(bytes);
+          const nextVisuals = parseVisualData(bytes, nextGame.cars);
+          game = nextGame;
+          visuals = nextVisuals;
           $scope.tuning.dyno.gameName = file.name;
           $scope.tuning.dyno.gameError = '';
         } catch (err) {
           game = null;
+          visuals = null;
           $scope.tuning.dyno.gameName = '';
           $scope.tuning.dyno.gameError = errorMessage(err);
         }
         drafts.clear();
+        visualDraft = null;
         rebuildDyno();
+        rebuildVisual();
       });
     };
     reader.onerror = () => $scope.$apply(() => { $scope.tuning.dyno.gameError = 'Could not read the file.'; });
     reader.readAsArrayBuffer(file);
+  };
+
+  $scope.editVisual = function (row: VisualRow): void {
+    if (!data || !visuals) return;
+    try {
+      const next = visuals.edit(visualDraft ?? data, $scope.tuning.slot, row.id, row.value);
+      visualDraft = sameBytes(next, data) ? null : next;
+      rebuildVisual();
+    } catch (err) {
+      setStatus('error', errorMessage(err));
+      rebuildVisual();
+    }
+  };
+
+  $scope.applyVisual = function (): void {
+    if (!visualDraft) return;
+    const next = visualDraft;
+    visualDraft = null;
+    applyResult(next);
+    setStatus('success', 'Visual parts applied. Download to save; test in game with a backup.');
+  };
+
+  $scope.discardVisual = function (): void {
+    visualDraft = null;
+    rebuildVisual();
+  };
+
+  $scope.editScalar = function (row: ScalarRow, byte: number): void {
+    try {
+      if (!Number.isFinite(byte)) throw new RangeError('Enter a finite tuning value.');
+      const value = row.stock + (byte - 100) * (row.max - row.min) / 100;
+      editSetup((bytes, model) => model.withScalarValue(bytes, row.param, value));
+    } catch (err) {
+      setStatus('error', errorMessage(err));
+      rebuildDyno();
+    }
+  };
+
+  $scope.resetScalar = function (param: number): void {
+    const row = $scope.tuning.dyno.scalars.find((r) => r.param === param);
+    if (!row) return;
+    try {
+      editSetup((bytes, model) => model.withScalarValue(bytes, param, row.stock));
+    } catch (err) {
+      setStatus('error', errorMessage(err));
+    }
   };
 
   $scope.selectSetup = function (setup: DynoEvent): void {
@@ -654,10 +767,12 @@ export function EditorController($scope: EditorScope): void {
     const slot = $scope.tuning.slot, setup = $scope.tuning.dyno.setup, saved = built.setups[setup];
     const changed = (from: number, to: number) => !sameBytes(bytes.subarray(from, to), saved.subarray(from, to));
     const gearing = changed(9, 16);
-    const parts = [changed(ECU_OFF, TURBO_OFF) && 'ECU', changed(TURBO_OFF, SETUP_SIZE) && 'turbo', gearing && 'gearing']
+    const scalars = changed(0, 9) || changed(16, 23);
+    const parts = [changed(ECU_OFF, TURBO_OFF) && 'ECU', changed(TURBO_OFF, SETUP_SIZE) && 'turbo', gearing && 'gearing',
+      scalars && 'scalar tuning']
       .filter(Boolean).join(', ');
     drafts.delete(key);
-    applyResult(setSetupTuning(data, slot, setup, bytes, gearing), true);
+    applyResult(setSetupTuning(data, slot, setup, bytes, gearing, scalars), true);
     setStatus('success', `Slot ${slot + 1}: ${SETUP_NAMES[setup]} ${parts || 'setup'} saved. Download to keep the changes.`);
   };
 

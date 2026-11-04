@@ -17,7 +17,7 @@
       </div>
       <div class="editor-build">
         <span class="build-badge" title="Build number: UTC date and time (YYYYMMDDhhmmss)">v__APP_VERSION__ &middot; Build __BUILD_NUMBER__</span>
-        <p class="build-splash">Now with DYNO!</p>
+        <p class="build-splash">Now with full TUNING!</p>
       </div>
     </div>
   </header>
@@ -112,7 +112,7 @@
 
   <div class="bike-dialog-backdrop" ng-if="tuning.open" ng-click="closeTuning()">
     <section class="bike-dialog tuning-dialog" role="dialog" aria-modal="true" aria-labelledby="tuningTitle" ng-click="$event.stopPropagation()"
-             ng-class="{ 'tuning-dialog-dyno': tuning.tab === 'DYNO' }">
+             ng-class="{ 'tuning-dialog-dyno': tuning.tab === 'DYNO', 'tuning-dialog-visual': tuning.tab === 'GRAPHICS' || tuning.tab === 'SPECIALTIES' }">
       <div class="bike-dialog-heading">
         <div>
           <p class="landing-eyebrow">TUNING</p>
@@ -157,11 +157,7 @@
           </section>
         </div>
       </div>
-      <div class="tuning-empty" ng-if="tuning.tab !== 'PERF' && tuning.tab !== 'DYNO'">
-        <strong>{{ activeTabLabel() }}</strong>
-        <span class="muted">Not mapped</span>
-      </div>
-      <div class="dyno-panel" ng-if="tuning.tab === 'DYNO'">
+      <div ng-if="tuning.tab !== 'PERF'">
         <div class="dyno-source">
           <label class="profile-action-btn dyno-file">
             {{ tuning.dyno.gameName ? 'Change game data' : 'Load game data' }}
@@ -171,6 +167,64 @@
           <span class="muted" ng-if="tuning.dyno.gameName">{{ tuning.dyno.gameName }} loaded</span>
         </div>
         <p class="message error" ng-if="tuning.dyno.gameError">{{ tuning.dyno.gameError }}</p>
+      </div>
+      <div class="visual-panel" ng-if="tuning.tab !== 'PERF' && tuning.tab !== 'DYNO'">
+        <p class="muted">{{ tuning.visual.blocked }}</p>
+        <p class="muted" ng-if="tuning.visual.groups.length">Compatible parts from your local game database. Colours use the stored RGB values; materials and lighting can look different in game. No 3D preview, purchases or money changes. Unknown installed parts are retained.</p>
+        <nav class="dyno-setups" aria-label="Visual categories">
+          <button type="button" ng-repeat="group in tuning.visual.groups track by group.label"
+                  ng-class="{ active: tuning.visual.category === group.label }"
+                  ng-click="tuning.visual.category = group.label">{{ group.label }}</button>
+        </nav>
+        <section class="visual-group" ng-repeat="group in tuning.visual.groups track by group.label"
+                 ng-if="tuning.visual.category === group.label">
+          <h3>{{ group.label }}</h3>
+          <div class="visual-layout">
+            <div class="visual-targets">
+              <div class="visual-row" ng-repeat="row in group.rows track by row.id" ng-class="{ 'visual-color-row': row.colorPicker }">
+                <label ng-attr-for="{{ row.colorPicker ? 'color-toggle-' + row.id : 'visual-' + row.id }}">{{ row.label }}</label>
+                <span class="visual-swatch" ng-style="{ backgroundColor: row.color || 'transparent' }" aria-hidden="true"></span>
+                <select ng-if="!row.colorPicker" id="visual-{{ row.id }}" ng-model="row.value" ng-change="editVisual(row)"
+                        ng-options="part.hash as part.label group by part.group for part in row.options"></select>
+                <button ng-if="row.colorPicker" id="color-toggle-{{ row.id }}" type="button" class="profile-action-btn visual-color-toggle"
+                        ng-class="{ 'visual-color-active': tuning.visual.colorSlot === row.id }"
+                        ng-click="tuning.visual.colorSlot = tuning.visual.colorSlot === row.id ? -1 : row.id"
+                        ng-attr-aria-expanded="{{ tuning.visual.colorSlot === row.id }}" aria-controls="color-picker-{{ row.id }}">
+                  {{ row.selectedLabel }}{{ row.retained ? ' (retained)' : '' }} &middot; Choose colour
+                </button>
+              </div>
+            </div>
+            <div class="visual-palette-panel" ng-repeat="row in group.rows track by row.id" ng-if="row.colorPicker && tuning.visual.colorSlot === row.id">
+              <div class="visual-color-picker" id="color-picker-{{ row.id }}" role="region" aria-labelledby="color-heading-{{ row.id }}">
+                <h4 id="color-heading-{{ row.id }}" class="visual-picker-heading">{{ row.label }}</h4>
+                <p class="muted" ng-if="row.retained">Installed colour is outside this slot's palette or unknown. It is kept until you choose a replacement.</p>
+                <button type="button" class="profile-action-btn" ng-click="row.value = 0; editVisual(row)"
+                        ng-attr-aria-pressed="{{ row.value === 0 }}">Default / none</button>
+                <div class="visual-palettes">
+                  <section class="visual-palette" ng-repeat="palette in row.palettes track by palette.name"
+                           ng-class="{ 'visual-named-colors': palette.name === 'Colours' }">
+                    <h4>{{ palette.name }}</h4>
+                    <div class="visual-color-grid" role="group" ng-attr-aria-label="{{ row.label }}: {{ palette.name }}">
+                      <button type="button" class="visual-color" ng-repeat="swatch in palette.swatches track by swatch.hash"
+                              ng-class="{ selected: row.value === swatch.hash, 'visual-color-unknown': !swatch.color }"
+                              ng-style="{ backgroundColor: swatch.color || 'transparent', color: swatch.ink }"
+                              ng-click="row.value = swatch.hash; editVisual(row)"
+                              ng-attr-title="{{ swatch.name }}" ng-attr-aria-label="{{ row.label }}: {{ swatch.name }}"
+                              ng-attr-aria-pressed="{{ row.value === swatch.hash }}">{{ swatch.number }}</button>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+        <p class="muted" ng-if="tuning.visual.groups.length">Wheel pairs and traced body/vinyl dependencies are updated together. Hidden and game-derived geometry slots are not editable.</p>
+        <div class="dyno-controls" ng-if="tuning.visual.hasProposal">
+          <button type="button" class="profile-action-btn" ng-click="applyVisual()">Apply visual changes</button>
+          <button type="button" class="profile-action-btn" ng-click="discardVisual()">Discard visual changes</button>
+        </div>
+      </div>
+      <div class="dyno-panel" ng-if="tuning.tab === 'DYNO'">
         <p class="muted" ng-if="tuning.dyno.blocked">{{ tuning.dyno.blocked }}</p>
         <div ng-if="tuning.dyno.rows.length">
           <div class="dyno-setups" role="tablist" aria-label="Dyno setups">
@@ -208,6 +262,20 @@
               <input type="checkbox" ng-model="tuning.dyno.cheat" ng-disabled="tuning.dyno.busy">
               Cheat limits (save-only): set each point on its own
             </label>
+            <section class="dyno-scalars" ng-if="tuning.dyno.scalars.length">
+              <div class="dyno-scalar" ng-repeat="row in tuning.dyno.scalars track by row.param">
+                <label for="scalar-{{ row.param }}">{{ row.label }}</label>
+                <strong>{{ row.displayValue | number:2 }} {{ row.unit }}</strong>
+                <input id="scalar-{{ row.param }}" type="range" step="1"
+                       ng-attr-min="{{ row.minByte }}" ng-attr-max="{{ row.maxByte }}" ng-value="row.byte"
+                       nfsu-range-change="editScalar(row, $value)" ng-disabled="!row.editable || tuning.dyno.busy"
+                       ng-attr-aria-valuetext="{{ row.displayValue | number:2 }} {{ row.unit }}">
+                <span class="muted">{{ row.displayMin | number:2 }} &ndash; {{ row.displayMax | number:2 }} {{ row.unit }}; stock {{ row.displayStock | number:2 }}</span>
+                <button type="button" class="profile-action-btn" ng-click="resetScalar(row.param)" ng-disabled="!row.editable || tuning.dyno.busy">Reset</button>
+                <span class="message error" ng-if="!row.editable">Invalid bounds in local game data; editing disabled.</span>
+              </div>
+              <p class="muted">Ranges and defaults follow the installed parts. Nitrous duration and flow are inverse-coupled. Ride height is in centimetres. These controls are saved, but their handling, grip, aero and nitrous effects are not predicted by the straight-line result table.</p>
+            </section>
             <div class="dyno-legend" aria-hidden="true" ng-if="tuning.dyno.drive">
               <span><i class="legend-gear-on"></i>Range up to current</span><span><i class="legend-gear-off"></i>Rest of range</span><span><i class="legend-stock"></i>Stock</span>
             </div>

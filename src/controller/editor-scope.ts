@@ -2,7 +2,8 @@ import type { Donor } from '../model/cars.js';
 import type { ChecksumStatus } from '../model/save-file.js';
 import type { SlotState } from '../model/slots.js';
 import type { PerfPart, UniquePerfPart } from '../data/perf-parts.js';
-import type { CurveKind, DynoEvent } from '../model/dyno.js';
+import type { CurveKind, DynoEvent, ScalarCategory, ScalarRow } from '../model/dyno.js';
+import type { ColorPalette } from '../model/visual.js';
 
 /** Result of a donor-list or file-load problem, shown in the status line. */
 export interface Status {
@@ -110,7 +111,7 @@ export interface CurveChart {
 }
 
 /** Graph tab of the dyno editor: an ECU/turbo curve or the drivetrain screen. */
-export type DynoTab = CurveKind | 'drive';
+export type DynoTab = CurveKind | 'drive' | ScalarCategory;
 
 /** One drivetrain row; positions are percentages of the bar width. */
 export interface GearBar {
@@ -162,6 +163,7 @@ export interface DynoView {
   /** Selected drivetrain row. */
   gear: number;
   drive: GearChart | null;
+  scalars: ScalarRow[];
 }
 
 /** Top-level tuning tab. */
@@ -175,6 +177,26 @@ export interface BackupView {
   current: number;
   note: string;
   profiles: { index: number; label: string }[];
+}
+
+export interface VisualRow {
+  id: number;
+  label: string;
+  value: number;
+  color: string;
+  colorPicker: boolean;
+  selectedLabel: string;
+  retained: boolean;
+  palettes: ColorPalette[];
+  options: { hash: number; label: string; group: string }[];
+}
+
+export interface VisualView {
+  blocked: string;
+  hasProposal: boolean;
+  category: string;
+  colorSlot: number;
+  groups: { label: string; rows: VisualRow[] }[];
 }
 
 /** State and actions the editor template binds to. */
@@ -202,6 +224,7 @@ export interface EditorScope extends angular.IScope {
     sub: string;
     categories: CategoryView[];
     dyno: DynoView;
+    visual: VisualView;
   };
 
   loadFile(file: File | null): void;
@@ -222,6 +245,11 @@ export interface EditorScope extends angular.IScope {
   swapSlots(slot: number): void;
   replaceCar(slot: number): void;
   loadGameData(file: File | null): void;
+  editVisual(row: VisualRow): void;
+  applyVisual(): void;
+  discardVisual(): void;
+  editScalar(row: ScalarRow, byte: number): void;
+  resetScalar(param: number): void;
   selectSetup(setup: DynoEvent): void;
   optimizeDyno(): void;
   applyDyno(): void;

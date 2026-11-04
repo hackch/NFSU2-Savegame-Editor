@@ -9,6 +9,7 @@ import {
 import { EditorController, curveChart } from '../controller/editor-controller.js';
 import { TRAFFIC_CARS } from '../data/traffic-cars.js';
 import { setSlotTrafficCar } from '../model/slots.js';
+import { parseVisualData, readVisual, VISUAL_OFF, VISUAL_COUNT } from '../model/visual.js';
 import type { EditorScope } from '../controller/editor-scope.js';
 import { UNLOCK_OFFSETS, UNLOCK_CATEGORY_OFFSETS } from '../data/unlock-table.js';
 import {
@@ -19,12 +20,12 @@ import {
   setPerfFlag, setPerfFlags, setUniquePerfFlag, uniquePerfOffset, PERF_COUNT, UNIQUE_PERF_COUNT,
 } from '../model/perf.js';
 import {
-  getCarKey, getCarTypeHash, isCarBought, isSlotUsed, isSlotLinked, isSlotLocked, setSlotCar, setSlotLocked, slotState, swapSlots,
+  getCarKey, getCarTypeHash, isCarBought, isSlotUsed, isSlotLocked, setSlotCar, setSlotLocked, slotState, swapSlots,
 } from '../model/slots.js';
 import { countUnlocked, countUnlockedCategory, setUnlocks, setUnlockCategory, UNLOCK_COUNT } from '../model/unlocks.js';
 import {
   MAGIC, HEADER_SIZE, SLOT_BASE, SLOT_COUNT, SLOT_STRIDE, SLOT_USED_OFF, PERF_OFF, MONEY_OFF, GARAGE_CAR_COUNT,
-  SLOT_LINK_OFF, SLOT_LINK_LEN, SLOT_LOCK_REL, SLOT_BOUGHT_REL, UNIQUE_PERF_OFF,
+  SLOT_LOCK_REL, SLOT_BOUGHT_REL, UNIQUE_PERF_OFF,
   EXTENDED_SAVE_SIZE, EXTRA_SLOT_RECORD_BASE, PROFILE_SIZE, SLOT_RECORD_END_REL, SLOT_RECORD_REL, slotBase, slotCount,
 } from '../model/layout.js';
 import {
@@ -586,6 +587,7 @@ test('every donor has three slot blocks whose key matches its key block tail', (
 test('every donor replacement identifies its car type in every slot, including shared-key cars', () => {
   const source = new Uint8Array(0xd300);
   source[SLOT_BASE + SLOT_USED_OFF] = 1;
+  source[SLOT_BASE + SLOT_BOUGHT_REL] = 1;
   for (const donor of donors) {
     const canonical = donors.find((d) => d.hash === donor.hash);
     assert.ok(canonical);
@@ -733,19 +735,14 @@ test('fixture: replacing a car only changes its slot and the checksum bytes', { 
   }
 });
 
-test('fixture: empty slot 5 becomes a used and linked car, and the garage count admits it', { skip: SKIP_NO_FIXTURE }, () => {
+test('fixture: empty slot 5 becomes a bought car without copying another car appearance', { skip: SKIP_NO_FIXTURE }, () => {
   const data = load();
   assert.equal(data[GARAGE_CAR_COUNT], 4);
-  assert.equal(isSlotLinked(data, 4), false);
   const out = setSlotCar(data, 4, donorNamed('Mazda Miata MX5'));
   assert.equal(isSlotUsed(out, 4), true);
-  assert.equal(isSlotLinked(out, 4), true);
   assert.equal(identifyCar(carIndex, getCarTypeHash(out, 4))?.name, 'Mazda Miata MX5');
   assert.equal(out[GARAGE_CAR_COUNT], 5);
-  const headerStart = SLOT_BASE + 4 * SLOT_STRIDE + 0x27c;
-  assert.deepEqual(out.slice(headerStart, headerStart + 24), data.slice(SLOT_BASE + 0x27c, SLOT_BASE + 0x27c + 24));
-  const linkStart = SLOT_BASE + 4 * SLOT_STRIDE + SLOT_LINK_OFF;
-  assert.deepEqual(out.slice(linkStart, linkStart + SLOT_LINK_LEN), data.slice(SLOT_BASE + SLOT_LINK_OFF, SLOT_BASE + SLOT_LINK_OFF + SLOT_LINK_LEN));
+  assert.ok(readVisual(out, 4).slice(153, 163).every((hash) => hash === 0));
 });
 
 test('setSlotCar never lowers the garage count', { skip: SKIP_NO_FIXTURE }, () => {
@@ -792,9 +789,49 @@ test('slotState gives locked priority over bought', () => {
   assert.equal(slotState(data, 2), 'filled');
 });
 
-test('setSlotCar refuses when there is no used slot to copy the header from', () => {
+test('setSlotCar can fill the first car without an appearance template', () => {
   const data = new Uint8Array(0xd300);
-  assert.throws(() => setSlotCar(data, 0, donors[0]), RangeError);
+  const out = setSlotCar(data, 0, donors[0]);
+  assert.equal(isCarBought(out, 0), true);
+  assert.equal(getCarTypeHash(out, 0), donors[0].hash);
+  assert.ok(readVisual(out, 0).slice(153, 163).every((hash) => hash === 0));
+});
+
+test('replacement clears old appearance, all stickers and neon in every career and web slot', () => {
+  const data = new Uint8Array(EXTENDED_SAVE_SIZE).fill(0xa5);
+  const original = data.slice();
+  for (let slot = 0; slot < 10; slot++) {
+    const base = slotBase(slot), clean = data.slice();
+    clean.fill(0, base + VISUAL_OFF, base + VISUAL_OFF + VISUAL_COUNT * 4);
+    for (const donor of donors) {
+      const out = setSlotCar(data, slot, donor);
+      const fromClean = setSlotCar(clean, slot, donor);
+      assert.deepEqual(out, fromClean, `${slot}:${donor.name}: old appearance must not survive`);
+      const refs = readVisual(out, slot);
+      for (const [first, end] of [[64,68], [77,93], [97,153], [153,163]]) {
+        assert.ok(refs.slice(first, end).every((hash) => hash === 0), `${slot}:${donor.name}:${first}`);
+      }
+      assert.deepEqual(out.subarray(base + 0x354, base + 0x354 + 5 * 41),
+        data.subarray(base + 0x354, base + 0x354 + 5 * 41), 'dyno setups kept');
+      assert.equal(slotState(out, slot), 'filled');
+      assert.equal(getCarTypeHash(out, slot), donor.hash);
+      assert.ok(diffOffsets(data, out).every((i) =>
+        i >= base && i < base + SLOT_RECORD_END_REL || i === GARAGE_CAR_COUNT), 'only target record changes');
+    }
+  }
+  assert.deepEqual(data, original, 'input remains unchanged');
+});
+
+test('replacement clears stickers and neon even when present in donor variants', () => {
+  const donor = donorNamed('Toyota Supra');
+  const bytes = new Uint8Array(VISUAL_COUNT * 4).fill(0xa5);
+  const withGraphics: Donor = { ...donor, blocks: [...donor.blocks, { off: SLOT_BASE + VISUAL_OFF, bytes }] };
+  const out = setSlotCar(new Uint8Array(PROFILE_SIZE), 0, withGraphics), refs = readVisual(out, 0);
+  for (const [first, end] of [[64,68], [77,93], [97,153], [154,159]]) {
+    assert.ok(refs.slice(first, end).every((hash) => hash === 0));
+  }
+  assert.equal(refs[63], 0xa5a5a5a5, 'donor paint is retained');
+  assert.ok(bytes.every((b) => b === 0xa5), 'donor not mutated');
 });
 
 test('lock state follows each slot\'s own flag, not the garage count', () => {
@@ -1354,7 +1391,8 @@ test('controller applies optional gearing and edits ECU/turbo drafts', { skip: S
   // Manual graph edits: step, keys, pointer, reset, apply.
   scope.loadFile({ name: 'career' } as File);
   scope.openTuning(0);
-  assert.deepEqual(scope.tuning.dyno.curveTabs.map((tab) => tab.kind), ['ecu', 'turbo', 'drive']);
+  assert.deepEqual(scope.tuning.dyno.curveTabs.map((tab) => tab.kind),
+    ['ecu', 'turbo', 'drive', 'suspension', 'aerodynamics', 'tires-brakes', 'nitrous']);
   assert.equal(scope.tuning.dyno.cheat, false, 'game tuning-screen rules by default');
   scope.tuning.dyno.cheat = true;
   scope.selectCurve('turbo');
@@ -1445,6 +1483,60 @@ test('controller applies optional gearing and edits ECU/turbo drafts', { skip: S
   gearExpected = model.withGearRatio(gearExpected, 9, model.gearing(gearExpected)!.rows[6].max);
   const gearOutput = new Uint8Array(await downloads[downloads.length - 1].arrayBuffer());
   assert.deepEqual(gearOutput, recalculateChecksums(setSetupTuning(source, 0, 1, gearExpected, true)));
+
+  for (const kind of ['suspension', 'aerodynamics', 'tires-brakes', 'nitrous'] as const) {
+    scope.loadFile({ name: 'career' } as File);
+    scope.selectCurve(kind);
+    assert.equal(scope.tuning.dyno.chart, null);
+    assert.equal(scope.tuning.dyno.drive, null);
+    const row = scope.tuning.dyno.scalars[0];
+    assert.ok(row.editable, kind);
+    scope.editScalar(row, row.minByte);
+    const expected = model.withScalarValue(sd.setups[1], row.param, row.min);
+    scope.download();
+    assert.deepEqual(new Uint8Array(await downloads.at(-1)!.arrayBuffer()), recalculateChecksums(source),
+      'scalar draft does not change saved bytes before Apply');
+    scope.applyDyno();
+    scope.download();
+    assert.deepEqual(new Uint8Array(await downloads.at(-1)!.arrayBuffer()),
+      recalculateChecksums(setSetupTuning(source, 0, 1, expected, false, true)));
+  }
+
+  scope.loadFile({ name: 'career' } as File);
+  scope.selectTab('GRAPHICS');
+  const paint = scope.tuning.visual.groups.flatMap((g) => g.rows).find((row) => row.id === 63)!;
+  assert.equal(paint.colorPicker, true);
+  assert.equal(paint.palettes.length, 9);
+  assert.equal(paint.palettes.flatMap((p) => p.swatches).length, 150);
+  assert.ok(!paint.palettes.some((p) => /HOSES|MUFFLERS/.test(p.name)));
+  const hoses = scope.tuning.visual.groups.flatMap((g) => g.rows).find((row) => row.id === 68)!;
+  assert.equal(hoses.palettes.flatMap((p) => p.swatches).length, 60);
+  assert.ok(hoses.palettes.every((p) => p.name.startsWith('HOSES_')));
+  paint.value = paint.palettes.flatMap((p) => p.swatches).find((p) => p.hash !== paint.value)!.hash;
+  scope.editVisual(paint);
+  assert.equal(scope.tuning.visual.hasProposal, true);
+  const selectedPaint = scope.tuning.visual.groups.flatMap((g) => g.rows).find((row) => row.id === 63)!;
+  assert.equal(selectedPaint.value, paint.value);
+  assert.equal(selectedPaint.selectedLabel, paint.palettes.flatMap((p) => p.swatches).find((p) => p.hash === paint.value)!.name);
+  scope.selectTab('SPECIALTIES');
+  assert.ok(scope.tuning.visual.groups.some((g) => g.label === 'Dials'));
+  scope.download();
+  assert.deepEqual(new Uint8Array(await downloads.at(-1)!.arrayBuffer()), recalculateChecksums(source),
+    'visual draft does not change saved bytes before Apply');
+  scope.applyVisual();
+  scope.download();
+  const catalog = parseVisualData(bun, game.cars);
+  const visualExpected = catalog.edit(source, 0, 63, paint.value);
+  assert.deepEqual(new Uint8Array(await downloads.at(-1)!.arrayBuffer()), recalculateChecksums(visualExpected));
+  assert.equal(scope.tuning.visual.hasProposal, false);
+  scope.selectTab('GRAPHICS');
+  const repaint = scope.tuning.visual.groups.flatMap((g) => g.rows).find((row) => row.id === 63)!;
+  repaint.value = 0;
+  scope.editVisual(repaint);
+  scope.discardVisual();
+  assert.equal(scope.tuning.visual.hasProposal, false);
+  scope.download();
+  assert.deepEqual(new Uint8Array(await downloads.at(-1)!.arrayBuffer()), recalculateChecksums(visualExpected));
 });
 
 function sameSetup(a: Uint8Array, b: Uint8Array): boolean {

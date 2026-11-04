@@ -1,13 +1,13 @@
 {
   "name": "nfsu2-savegame-editor",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "description": "Static browser editor for Need for Speed: Underground 2 career saves.",
   "type": "module",
   "license": "MIT",
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/copy-static.mjs",
-    "test": "npm run build && node --test dist/test/save.test.js",
+    "test": "npm run build && node --test dist/test/*.test.js",
     "clean": "node -e \"import('node:fs').then(f => f.rmSync('dist', { recursive: true, force: true }))\""
   },
   "devDependencies": {

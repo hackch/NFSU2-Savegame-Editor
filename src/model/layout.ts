@@ -35,18 +35,12 @@ export const EXTRA_SLOT_RECORD_BASE = PROFILE_SIZE;
 export const MAX_SLOT_COUNT = 10;
 /** Length of a career save plus its five GARAGE.DAT records. */
 export const EXTENDED_SAVE_SIZE = EXTRA_SLOT_RECORD_BASE + SLOT_COUNT * SLOT_STRIDE;
-/** Slot-relative used header; a non-zero uint16 means the slot holds a car. */
+/** Legacy replacement-template start (window tint); this is not an ownership/usage flag. */
 export const SLOT_USED_OFF = 0x27c;
-/** Length of the used header copied when a slot is filled. */
-export const SLOT_HEADER_LEN = 24;
 /** Slot-relative model key (last 4 bytes of the `+0x2B0` block). */
 export const CAR_KEY_REL = 0x2bc;
 /** Slot-relative car type hash, matching the GLOBALB.BUN car record. */
 export const CAR_TYPE_HASH_REL = 0x14;
-/** Slot-relative link block; all zero means it is not linked. */
-export const SLOT_LINK_OFF = 0x294;
-/** Length of the link block. */
-export const SLOT_LINK_LEN = 16;
 /** Slot-relative lock flag; non-zero means the slot is locked. */
 export const SLOT_LOCK_REL = 0x428;
 /** Slot-relative "car bought" flag; zero on an unlocked slot means it is open for a sponsor car. */
@@ -57,6 +51,9 @@ export const GARAGE_CAR_COUNT = 0xa175;
 export const GARAGE_CAR_MAX = 6;
 /** Slot-relative start of the performance part flags, one byte per part. */
 export const PERF_OFF = 0x310;
+/** Slot-relative start and count of saved visual-part hashes. */
+export const VISUAL_OFF = 0x18;
+export const VISUAL_COUNT = 170;
 /** Slot-relative start of nine unique-performance uint32 fields. */
 export const UNIQUE_PERF_OFF = 0x2e8;
 /** Slot-relative start of the indexed performance ownership bitset. */

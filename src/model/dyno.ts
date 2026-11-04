@@ -1,5 +1,5 @@
 /**
- * Dyno model of NFSU2: car physics builder, dyno tuning (gears, ECU, turbo) and the drag / top speed
+ * Dyno model of NFSU2: car physics builder, scalar/gear/curve tuning and the drag / top speed
  * simulation, ported from SPEED2.EXE. Car data comes from the user's own `GLOBAL\GLOBALB.BUN`.
  * See technical.md, "Dyno tuning", for the traced functions.
  */
@@ -77,7 +77,59 @@ export interface CarRecord {
 
 interface PackageSub { item: number; fractions: number[] }
 interface Package { category: number; level: number; subs: PackageSub[] }
-interface TuningRecord { item: number; level: number; param: number; type: number; f8: number; fC: number }
+interface TuningRecord {
+  item: number; level: number; param: number; type: number; f8: number; fC: number;
+  displayMin?: number; displayMax?: number;
+}
+
+export type ScalarCategory = 'suspension' | 'aerodynamics' | 'tires-brakes' | 'nitrous';
+
+/**
+ * Scalar values use physics units; display fields use the game's metric display scale.
+ * The display transform is linear: min/max correspond to displayMin/displayMax.
+ * Ride height is in cm (multiply the physics value by 39.37 for the game's inches).
+ */
+export interface ScalarRow {
+  param: number;
+  label: string;
+  category: ScalarCategory;
+  min: number;
+  max: number;
+  stock: number;
+  value: number;
+  byte: number;
+  minByte: number;
+  maxByte: number;
+  displayMin: number;
+  displayMax: number;
+  displayStock: number;
+  displayValue: number;
+  unit: string;
+  /** Some traffic-car records contain inverted bounds; do not offer writes for these rows. */
+  editable: boolean;
+}
+
+const SCALARS: ReadonlyArray<readonly [number, string, ScalarCategory]> = [
+  [0, 'Front springs', 'suspension'], [1, 'Front shocks', 'suspension'],
+  [2, 'Front sway bar', 'suspension'], [3, 'Front ride height', 'suspension'],
+  [4, 'Rear springs', 'suspension'], [5, 'Rear shocks', 'suspension'],
+  [6, 'Rear sway bar', 'suspension'], [7, 'Rear ride height', 'suspension'],
+  [8, 'Steering ratio', 'suspension'],
+  [16, 'Nitrous duration', 'nitrous'], [17, 'Nitrous flow rate', 'nitrous'],
+  [18, 'Brake bias', 'tires-brakes'], [19, 'Front tire grip', 'tires-brakes'],
+  [20, 'Rear tire grip', 'tires-brakes'],
+  [21, 'Front downforce', 'aerodynamics'], [22, 'Rear downforce', 'aerodynamics'],
+];
+
+const scalarOffsets = (param: number): number[] => {
+  const offsets: Record<number, number[]> = {
+    0: [0x174], 1: [0x178, 0x17c], 2: [0x180], 3: [0x18, 0x48],
+    4: [0x194], 5: [0x198, 0x19c], 6: [0x1a0], 7: [0x78, 0xa8],
+    8: [0x270], 16: [0x2a0], 17: [0x2ac], 18: [0x27c],
+    19: [0xdc, 0xe0], 20: [0xfc, 0x100], 21: [0x264], 22: [0x268],
+  };
+  return offsets[param];
+};
 
 /** Game data parsed from GLOBALB.BUN. */
 export interface GameData {
@@ -258,6 +310,7 @@ export function parseGameData(bytes: Uint8Array): GameData {
     tuning.push({
       item: dv.getUint32(o, true), level: bytes[o + 4], param: bytes[o + 5], type: bytes[o + 6],
       f8: dv.getFloat32(o + 8, true), fC: dv.getFloat32(o + 12, true),
+      displayMin: dv.getFloat32(o + 16, true), displayMax: dv.getFloat32(o + 20, true),
     });
   }
   if (!cars.length || !packages.length || !tuning.length) {
@@ -306,13 +359,15 @@ export function setSetupCurves(save: Uint8Array, slot: number, setup: number, by
   return setSetupTuning(save, slot, setup, bytes);
 }
 
-/** Writes one setup's curves and, when requested, final-drive/gear bytes. */
-export function setSetupTuning(save: Uint8Array, slot: number, setup: number, bytes: Uint8Array, gearing = false): Uint8Array {
+/** Writes curves and optionally gearing and/or all scalar controls; other setup bytes remain intact. */
+export function setSetupTuning(save: Uint8Array, slot: number, setup: number, bytes: Uint8Array, gearing = false,
+  scalars = false): Uint8Array {
   if (bytes.length !== SETUP_SIZE) throw new RangeError(`A setup has ${SETUP_SIZE} bytes.`);
   const out = save.slice();
   const off = setupOffset(slot, setup);
   out.set(bytes.subarray(ECU_OFF, SETUP_SIZE), off + ECU_OFF);
   if (gearing) out.set(bytes.subarray(9, 16), off + 9);
+  if (scalars) for (const [param] of SCALARS) out[off + param] = bytes[param];
   return out;
 }
 
@@ -422,6 +477,11 @@ export class DynoModel {
       s(p, 0x1c4, g(p, 0x1c4) + (R(c, 0x3e4) - g(p, 0x1c4)) * out[0]);
       s(p, 0x1fc, g(p, 0x1fc) + R(c, 0x41c) * out[1]);
     }
+    ({ f, out } = this.fraction(2, 1));
+    if (f) {
+      s(p, 0x2a0, g(p, 0x2a0) + (R(c, 0x580) - g(p, 0x2a0)) * out[0]);
+      s(p, 0x2ac, R(c, 0x58c));
+    }
     ({ f } = this.fraction(3, 1));
     if (f) {
       for (let i = 0; i < 9; i++) s(p, 0x200 + 4 * i, g(p, 0x200 + 4 * i) + R(c, 0x420 + 4 * i) * f);
@@ -432,6 +492,26 @@ export class DynoModel {
       const t = (R(c, 0x510 + 4 * i) - g(p, 0x224 + 4 * i)) * f + g(p, 0x224 + 4 * i);
       s(p, 0x224 + 4 * i, t);
       s(p, 0x200 + 4 * i, g(p, 0x200 + 4 * i) + t);
+    }
+    ({ f, out } = this.fraction(5, 3));
+    if (f) {
+      for (let axle = 0; axle < 2; axle++) {
+        for (let i = 0; i < 8; i++) {
+          const off = 0x170 + axle * 0x20 + i * 4;
+          const fraction = i === 4 ? out[1] : out[0];
+          s(p, off, g(p, off) + (R(c, 0x5c0 + axle * 0x20 + i * 4) - g(p, off)) * fraction);
+        }
+        for (const off of scalarOffsets(axle ? 7 : 3)) {
+          s(p, off, g(p, off) + R(c, axle ? 0x608 : 0x604) * out[0]);
+        }
+      }
+      s(p, 8, g(p, 8) - R(c, 0x600) * out[0]);
+      s(p, 0x270, g(p, 0x270) + (R(c, 0x5bc) - g(p, 0x270)) * out[2]);
+    }
+    ({ f } = this.fraction(6, 1));
+    if (f) for (let i = 0; i < 3; i++) {
+      const off = 0x274 + i * 4;
+      s(p, off, g(p, off) + (R(c, 0x5b0 + i * 4) - g(p, off)) * f);
     }
     ({ f } = this.fraction(7, 1));
     if (this.installed[45] || this.installed[46] || this.installed[51]) s(p, 0x290, 0);
@@ -445,6 +525,17 @@ export class DynoModel {
       }
       for (let i = 0; i < 9; i++) s(p, 0x200 + 4 * i, g(p, 0x200 + 4 * i) + R(c, 0x4e0 + 4 * i) * f);
     }
+    ({ f } = this.fraction(8, 1));
+    if (f) for (const axle of [0, 0x20]) for (const off of [0xd0, 0xd4, 0xd8, 0xdc, 0xe0]) {
+      s(p, off + axle, g(p, off + axle) + (R(c, off + axle + 0x470) - g(p, off + axle)) * f);
+    }
+    ({ f, out } = this.fraction(9, 2));
+    if (f) {
+      for (let i = 0; i < 3; i++) {
+        const off = 0x264 + i * 4;
+        s(p, off, g(p, off) + (R(c, 0x590 + i * 4) + R(c, 0x5a0 + i * 4)) * (i < 2 ? out[i] : f));
+      }
+    }
     // The unique transmission sets the drive bias, and its removal never restores it.
     if (this.uniques[1]) s(p, 0x1c0, R(c, 0x2b4));
     return p;
@@ -453,6 +544,11 @@ export class DynoModel {
   private addUniques(p: Phys): void {
     const c = this.car, u = this.uniques;
     if (u[0]) s(p, 0x110, g(p, 0x110) * (1 - R(c, 0x2b0)));
+    if (u[2]) s(p, 0x2ac, g(p, 0x2ac) + R(c, 0x2b8));
+    if (u[6]) s(p, 0x274, g(p, 0x274) + R(c, 0x2bc));
+    if (u[8]) for (const [off, delta] of [[0xdc, 0x2c0], [0xe0, 0x2c8], [0xfc, 0x2c4], [0x100, 0x2cc]]) {
+      s(p, off, g(p, off) + R(c, delta));
+    }
     for (let i = 0; i < 9; i++) {
       let d = 0;
       if (u[3]) d += R(c, 0x2d0 + 4 * i);
@@ -476,7 +572,47 @@ export class DynoModel {
     return r / speed * (g(p, 0x1f4) * RAD_PER_RPM / g(p, 0x1b8));
   }
 
+  private modifyBounds(param: number, lo: number, hi: number): [number, number] {
+    const rec = this.tuneRecords.get(param);
+    if (!rec) return [lo, hi];
+    if (rec.type === 2 || rec.type === 3) return [(hi - lo) * rec.f8 + lo, (hi - lo) * rec.fC + hi];
+    if (rec.type === 0 || rec.type === 1) return [lo + rec.f8, hi + rec.fC];
+    return [Math.min(lo, rec.f8), Math.max(hi, rec.fC)];
+  }
+
+  /** FUN_005aca50, with the per-component helpers for shocks and tire grip. */
+  private scalarAbsRange(param: number, component?: number): [number, number] {
+    const c = this.car;
+    if ([1, 5, 19, 20].includes(param)) {
+      const offsets = scalarOffsets(param);
+      const upgraded = param === 1 ? 0x5c8 : param === 5 ? 0x5e8 : param === 19 ? 0x54c : 0x56c;
+      const ranges = offsets.map((off, i) => this.modifyBounds(param, R(c, off), R(c, upgraded + i * 4)));
+      return component === undefined
+        ? [(ranges[0][0] + ranges[1][0]) / 2, (ranges[0][1] + ranges[1][1]) / 2]
+        : ranges[component];
+    }
+    // Nitrous and brake bias use fixed absolute ranges and skip FUN_0059b160.
+    if (param === 16) return [1, 11];
+    if (param === 17) return [0.1, 0.9];
+    if (param === 18) return [0, 1];
+    let values: number[];
+    if (param === 0 || param === 4) values = [0x174, 0x194, 0x5c4, 0x5e4].map((off) => R(c, off));
+    else if (param === 2 || param === 6) values = [0x180, 0x1a0, 0x5d0, 0x5f0].map((off) => R(c, off));
+    else if (param === 3 || param === 7) values = [-R(c, 0x604), -R(c, 0x608), 0];
+    else if (param === 8) values = [R(c, 0x270), R(c, 0x5bc)];
+    else values = [R(c, 0x264), R(c, 0x268),
+      R(c, 0x264) + R(c, 0x590) + R(c, 0x5a0), R(c, 0x268) + R(c, 0x594) + R(c, 0x5a4)];
+    return this.modifyBounds(param, Math.min(...values), Math.max(...values));
+  }
+
+  private scalarDefault(p: Phys, param: number): number {
+    if (param === 3 || param === 7) return R(this.car, scalarOffsets(param)[0]) - g(p, scalarOffsets(param)[0]);
+    const offsets = scalarOffsets(param);
+    return offsets.reduce((sum, off) => sum + g(p, off), 0) / offsets.length;
+  }
+
   private absRange(p: Phys, param: number): [number, number] {
+    if (SCALARS.some(([id]) => id === param)) return this.scalarAbsRange(param);
     const c = this.car;
     const rec = this.tuneRecords.get(param);
     let lo: number, hi: number;
@@ -529,7 +665,7 @@ export class DynoModel {
     const rec = this.tuneRecords.get(param) as TuningRecord;
     let [lo, hi] = this.absRange(p, param);
     const curve = param === P_ECU || param === P_TURBO;
-    const d = curve ? (this.curveDefs.get(param) as number[])[i] : this.defs.get(param) ?? 0;
+    const d = curve ? (this.curveDefs.get(param) as number[])[i] : this.referenceDefault(param);
     if (curve) [lo, hi] = this.caps(p, param, i, lo, hi);
     let mn: number, mx: number;
     if (rec.type === 0) {
@@ -537,6 +673,12 @@ export class DynoModel {
       else { mn = lo; mx = Math.min(hi, d + rec.fC); }
     } else if (rec.type === 1) {
       mn = Math.max(lo, d + rec.f8); mx = Math.min(hi, d + rec.fC);
+    } else if (rec.type === 2) {
+      if (param === 3 || param === 7 || param === 9) { mn = Math.max(lo, d - (hi - lo) * rec.fC); mx = hi; }
+      else { mn = lo; mx = Math.min(hi, d + (hi - lo) * rec.fC); }
+    } else if (rec.type === 3) {
+      mn = Math.max(lo, d + (hi - lo) * rec.f8);
+      mx = Math.min(hi, d + (hi - lo) * rec.fC);
     } else if (rec.type === 4) {
       mn = rec.f8; mx = rec.fC;
     } else {
@@ -544,6 +686,36 @@ export class DynoModel {
     }
     if (mn === mx) mx += 0.01;
     return [mn, mx];
+  }
+
+  /** FUN_005a79f0 uses common reference defaults for these front/rear pairs. */
+  private referenceDefault(param: number): number {
+    const pair = param === 0 || param === 4 ? [0, 4] : param === 2 || param === 6 ? [2, 6]
+      : param === 3 || param === 7 ? [3, 7] : param === 21 || param === 22 ? [21, 22] : [param];
+    const defaults = pair.map((id) => this.defs.get(id) ?? 0);
+    return param === 3 || param === 7 || param === 9 ? Math.min(...defaults) : Math.max(...defaults);
+  }
+
+  private setScalar(p: Phys, param: number, value: number): void {
+    const offsets = scalarOffsets(param);
+    if (param === 3 || param === 7) {
+      for (const off of offsets) s(p, off, R(this.car, off) - value);
+    } else if ([1, 5, 19, 20].includes(param)) {
+      const [lo, hi] = this.scalarAbsRange(param);
+      const t = hi === lo ? 0 : (clamp(value, lo, hi) - lo) / (hi - lo);
+      offsets.forEach((off, i) => {
+        const [min, max] = this.scalarAbsRange(param, i);
+        s(p, off, min + t * (max - min));
+      });
+    } else {
+      s(p, offsets[0], value);
+      if (param === 16 || param === 17) {
+        const other = param === 16 ? 17 : 16;
+        const [lo, hi] = this.range(p, param), [min, max] = this.range(p, other);
+        s(p, scalarOffsets(other)[0], (this.defs.get(other) ?? 0)
+          - (value - (this.defs.get(param) ?? 0)) * (max - min) / (hi - lo));
+      }
+    }
   }
 
   private setGear(p: Phys, value: number, param: number): void {
@@ -585,6 +757,23 @@ export class DynoModel {
     this.defs = new Map();
     this.curveDefs = new Map();
     this.curvePeak = new Map();
+    for (const [param] of SCALARS) if (this.active(p, param)) this.defs.set(param, this.scalarDefault(p, param));
+    const applyScalars = (first: number, last: number): void => {
+      for (const [param] of SCALARS) {
+        if (param < first || param > last || !this.active(p, param)) continue;
+        const [lo, hi] = this.range(p, param);
+        this.setScalar(p, param, clamp((hi - lo) * byteT(gearBytes[param]) + this.defs.get(param)!, lo, hi));
+        if (param === 16 || param === 17) {
+          const other = param === 16 ? 17 : 16;
+          if (this.active(p, other)) {
+            const [min, max] = this.range(p, other);
+            gearBytes[other] = clamp(Math.floor(100.5 + 100
+              * (clamp(this.scalarDefault(p, other), min, max) - this.defs.get(other)!) / (max - min)), 0, MAX_TUNE_BYTE);
+          }
+        }
+      }
+    };
+    applyScalars(0, 8);
     for (let prm = 9; prm <= 15; prm++) {
       if (this.active(p, prm)) this.defs.set(prm, prm === 9 ? g(p, 0x1b8) : g(p, 0x1b0 + prm * 4));
     }
@@ -615,6 +804,7 @@ export class DynoModel {
         gearBytes[gear] = clamp(Math.floor(100.5 + 100 * (ratio - gearDef) / (max - min)), 0, MAX_TUNE_BYTE);
       }
     }
+    applyScalars(16, 22);
     const sum = () => { let t = 0; for (let i = 0; i < 9; i++) t += g(p, 0x200 + 4 * i); return t; };
     const s0 = sum();
     for (const [prm, off] of [[P_ECU, ECU_OFF], [P_TURBO, TURBO_OFF]] as const) {
@@ -650,6 +840,62 @@ export class DynoModel {
   evaluate(setup: ArrayLike<number>): DynoResult {
     const p = this.tuned(setup);
     return { ...dragSim(p, this.car.index), topSpeed: topSpeed(p) * MPH, ...peaks(p) };
+  }
+
+  /** Unlocked non-curve controls. Display bounds are the editable bounds, not the full scale. */
+  scalarTuning(setup: ArrayLike<number>): ScalarRow[] {
+    if (setup.length !== SETUP_SIZE) throw new RangeError(`A setup has ${SETUP_SIZE} bytes.`);
+    const p = this.tuned(setup);
+    return SCALARS.filter(([param]) => this.active(p, param)).map(([param, label, category]) => {
+      const rec = this.tuneRecords.get(param)!;
+      const [min, max] = this.range(p, param), [lo, hi0] = this.scalarAbsRange(param);
+      const hi = hi0 === lo ? hi0 + 0.01 : hi0;
+      const stock = this.defs.get(param)!;
+      const value = param === 16 || param === 17
+        ? this.scalarDefault(p, param) - (param === 17 && this.uniques[2] ? R(this.car, 0x2b8) : 0)
+        : clamp(stock + (max - min) * byteT(setup[param]), min, max);
+      const metric = param === 3 || param === 7 ? 100 : 1;
+      const explicit = (v: number | undefined): v is number => v !== undefined && Math.abs(v + 99.99) > 0.001;
+      const displayLo = explicit(rec.displayMin) ? rec.displayMin : lo * metric;
+      const displayHi = explicit(rec.displayMax) ? rec.displayMax : hi * metric;
+      const display = (v: number) => displayLo + (v - lo) * (displayHi - displayLo) / (hi - lo);
+      const toByte = (v: number) => 100 + 100 * (v - stock) / (max - min);
+      return {
+        param, label, category, min, max, stock, value, byte: setup[param],
+        minByte: clamp(Math.ceil(toByte(min) - 1e-6), 0, MAX_TUNE_BYTE),
+        maxByte: clamp(Math.floor(toByte(max) + 1e-6), 0, MAX_TUNE_BYTE),
+        displayMin: display(min), displayMax: display(max), displayStock: display(stock), displayValue: display(value),
+        unit: param === 3 || param === 7 ? 'cm' : param === 16 ? 's' : '',
+        editable: Number.isFinite(min) && Number.isFinite(max) && min < max,
+      };
+    });
+  }
+
+  /**
+   * Edits a scalar in physics units, preserving the input and unrelated bytes.
+   * Nitrous necessarily writes both duration and flow: the game re-encodes the partner on load.
+   */
+  withScalarValue(setup: ArrayLike<number>, param: number, value: number): Uint8Array {
+    if (!Number.isFinite(value)) throw new RangeError('A tuning value must be finite.');
+    const rows = this.scalarTuning(setup);
+    const row = rows.find((r) => r.param === param);
+    if (!row) throw new RangeError('This scalar tuning control is locked or unknown.');
+    if (!row.editable) throw new RangeError('Local game data has invalid bounds for this tuning control.');
+    const out = Uint8Array.from(setup);
+    const encode = (r: ScalarRow, v: number): number => {
+      const b = 100 + 100 * (clamp(v, r.min, r.max) - r.stock) / (r.max - r.min);
+      return clamp(Math.floor(b + 0.5), r.minByte, r.maxByte);
+    };
+    out[param] = encode(row, value);
+    if (param === 16 || param === 17) {
+      const other = rows.find((r) => r.param === (param === 16 ? 17 : 16));
+      if (other) {
+        const quantized = clamp(row.stock + (row.max - row.min) * byteT(out[param]), row.min, row.max);
+        out[other.param] = encode(other, other.stock - (quantized - row.stock)
+          * (other.max - other.min) / (row.max - row.min));
+      }
+    }
+    return out;
   }
 
   /**

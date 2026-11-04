@@ -390,3 +390,45 @@ body {
   .bike-dialog-backdrop { padding: 10px; }
   .tuning-dialog { padding: 16px; }
 }
+.visual-group { margin: 1rem 0; }
+.dyno-scalar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .5rem; padding: .8rem 0; }
+.dyno-scalar input[type="range"] { grid-column: 1 / -1; width: 100%; }
+.visual-group h3 { margin-bottom: .5rem; }
+.visual-row { display: grid; grid-template-columns: minmax(9rem, 1fr) 1.5rem minmax(0, 2fr); align-items: center; gap: .6rem; margin: .45rem 0; }
+.visual-row label { text-transform: capitalize; }
+.visual-row select { width: 100%; min-width: 0; }
+.visual-swatch { display: inline-block; width: 1.4rem; height: 1.4rem; border: 1px solid #888; border-radius: .2rem; }
+.visual-color-toggle { text-align: left; overflow-wrap: anywhere; min-width: 0; }
+.visual-color-toggle.visual-color-active { outline: 2px solid var(--color-text-strong); outline-offset: 2px; }
+.visual-layout, .visual-targets, .visual-palette-panel { min-width: 0; }
+.visual-picker-heading { margin: 0 0 .6rem; text-transform: capitalize; }
+.visual-color-picker { grid-column: 1 / -1; min-width: 0; padding: .6rem; border: 1px solid var(--color-border); }
+.visual-palettes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: .8rem; margin-top: .8rem; }
+.visual-palette { min-width: 0; align-self: start; }
+.visual-palette h4 { margin: 0 0 .4rem; font-size: .75rem; overflow-wrap: anywhere; color: var(--color-text-strong); }
+.visual-color-grid { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 3px; }
+.visual-color {
+  min-width: 0; min-height: 28px; padding: 3px 0; border: 2px solid transparent; border-radius: 50%;
+  background-image: radial-gradient(circle at 30% 20%, #ffffff66, transparent 55%);
+  font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; text-shadow: 0 1px 2px #0006;
+}
+.visual-color.selected { border-color: var(--color-primary); outline: 2px solid var(--color-text-strong); outline-offset: 0; }
+.visual-color-unknown { border-color: var(--color-border); border-radius: .2rem; font-size: 9px; overflow-wrap: anywhere; }
+.visual-color:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.visual-named-colors .visual-color-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.visual-named-colors .visual-color { border-radius: .2rem; font-size: 10px; overflow-wrap: anywhere; }
+@media (min-width: 1000px) {
+  .tuning-dialog.tuning-dialog-visual { width: min(100%, 1240px); }
+  .visual-layout:has(.visual-palette-panel) {
+    display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); gap: 1.2rem; align-items: start;
+  }
+  .visual-layout:has(.visual-palette-panel) .visual-row { grid-template-columns: minmax(0, 1fr) 1.5rem; }
+  .visual-layout:has(.visual-palette-panel) .visual-row select,
+  .visual-layout:has(.visual-palette-panel) .visual-color-toggle { grid-column: 1 / -1; }
+}
+@media (max-width: 550px) {
+  .visual-row { grid-template-columns: minmax(0, 1fr) 1.5rem; }
+  .visual-row select, .visual-color-toggle { grid-column: 1 / -1; }
+  .visual-color-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+  .visual-color { min-height: 44px; font-size: 13px; }
+}
