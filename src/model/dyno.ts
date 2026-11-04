@@ -1217,8 +1217,14 @@ function topSpeed(p: Phys): number {
   }
   if (!forces.length) return 0;
   const vmax = v;
+  // FUN_005b5ab0 zeroes the last computed force, spans the n forces over [0, vmax] with n-1 intervals (spacing
+  // vmax/(n-1), not SPEED_STEP) and resamples them to the 64-point table that FUN_005b5930 walks while sp <= vmax.
+  const n = forces.length;
+  forces[n - 1] = 0;
+  const TOP_N = 64;
+  const res = Array.from({ length: TOP_N }, (_, i) => interp(forces, 0, (n - 1) / vmax, i * vmax / (TOP_N - 1)));
   let sp = 0;
-  while (sp < vmax && sp * k * sp / mass <= interp(forces, 0, 1 / SPEED_STEP, sp)) sp += SPEED_STEP;
+  while (sp <= vmax && sp * k * sp / mass <= interp(res, 0, (TOP_N - 1) / vmax, sp)) sp += SPEED_STEP;
   const limit = g(p, 0x290);
   return limit > 0 && limit * 0.44703 < sp ? limit * 0.44703 : sp;
 }
