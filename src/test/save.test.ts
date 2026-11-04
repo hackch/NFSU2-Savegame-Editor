@@ -50,7 +50,7 @@ test('built page includes its version, numeric UTC build stamp and splash label'
   const { version } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
   assert.ok(html.includes(`v${version} &middot; Build `));
   assert.match(html, /Build \d{14}<\/span>/);
-  assert.ok(html.includes('Now with DYNO!'));
+  assert.ok(html.includes('Now with full TUNING!'));
   assert.ok(!html.includes('__APP_VERSION__'));
   assert.ok(!html.includes('__BUILD_NUMBER__'));
 });
