@@ -1013,8 +1013,9 @@ test('shift power windows integrate every RPM recovery band in five and six spee
       assert.equal(window.retention, 0.75);
       assert.equal(window.shiftRpm, 5800);
       assert.equal(window.landingRpm, 4350);
-      // Constant torque gives power linear in RPM; the game's peak sampler stops at 6950.
-      assert.ok(Math.abs(window.powerCoverage - 5075 / 6950) < 1e-9);
+      // Constant torque gives power linear in RPM; the game's peak sampler stops at 6950. The peak is sampled in
+      // float32 (FUN_005b56e0), so the ratio is exact only to float32 precision.
+      assert.ok(Math.abs(window.powerCoverage - 5075 / 6950) < 1e-6);
     }
     const band = { minRpm: 2500, maxRpm: 5500, description: 'Analytic constant-torque band' };
     const expected = Math.fround(0.3) * 0.10471204 * Math.cbrt(3000 * 4000 * 5000);

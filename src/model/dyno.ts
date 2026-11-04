@@ -1136,16 +1136,21 @@ export class DynoModel {
  * peak power helper (`FUN_005ac980`). The torque table is in kN·m, so power comes out in kW.
  */
 function peaks(p: Phys): Pick<DynoResult, 'peakTorque' | 'peakTorqueRpm' | 'peakPower' | 'peakPowerRpm'> {
-  const { tab, idle, inv } = torqueTable(p);
-  const red = g(p, 0x1f8);
+  // FUN_005b5810 / FUN_005b56e0 sample the float32 interpolation. On a flat stretch of the curve the float32
+  // rounding decides which 50-rpm sample is the (strictly greater) maximum, so the peak rpm follows it.
+  const f = Math.fround;
+  const tab = Array.from({ length: 9 }, (_, i) => f(g(p, 0x200 + 4 * i)));
+  const idle = f(g(p, 0x1f0)), red = f(g(p, 0x1f8));
+  const inv = f(8 / f(red - idle));
+  const kwf = f(1.0471204e-4);
   let peakTorque = 0, peakTorqueRpm = idle, peakPower = 0, peakPowerRpm = idle;
-  for (let rpm = idle; rpm < red; rpm += 50) {
-    const nm = interp(tab, idle, inv, rpm) * 1000;
-    const kw = nm * rpm * 1.0471204e-4;
-    if (nm > peakTorque) { peakTorque = nm; peakTorqueRpm = rpm; }
-    if (kw > peakPower) { peakPower = kw; peakPowerRpm = rpm; }
+  for (let rpm = idle; rpm < red; rpm = f(rpm + 50)) {
+    const t = interp32(tab, idle, inv, rpm);
+    const kw = f(f(f(t * 1000) * rpm) * kwf);
+    if (peakTorque < t) { peakTorque = t; peakTorqueRpm = rpm; }
+    if (peakPower < kw) { peakPower = kw; peakPowerRpm = rpm; }
   }
-  return { peakTorque, peakTorqueRpm, peakPower, peakPowerRpm };
+  return { peakTorque: peakTorque * 1000, peakTorqueRpm, peakPower, peakPowerRpm };
 }
 
 function drive(p: Phys): { fd: number; invR: number } {
