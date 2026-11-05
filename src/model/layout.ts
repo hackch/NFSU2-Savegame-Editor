@@ -45,10 +45,8 @@ export const CAR_TYPE_HASH_REL = 0x14;
 export const SLOT_LOCK_REL = 0x428;
 /** Slot-relative "car bought" flag; zero on an unlocked slot means it is open for a sponsor car. */
 export const SLOT_BOUGHT_REL = 0x429;
-/** Garage car count byte. Not the lock; the per-slot flag above decides it. */
-export const GARAGE_CAR_COUNT = 0xa175;
-/** Cap of the garage car count. */
-export const GARAGE_CAR_MAX = 6;
+/** Current career-stage index, uint32 LE; not a garage count. */
+export const CURRENT_STAGE_OFF = 0xa175;
 /** Slot-relative start of the performance part flags, one byte per part. */
 export const PERF_OFF = 0x310;
 /** Slot-relative start and count of saved visual-part hashes. */

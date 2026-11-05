@@ -12,8 +12,8 @@ The reference career save is **54,966 bytes (`0xD6B6`, 53.68 KiB)**. Read the gr
 
 | Evidence state | Bytes | File coverage |
 | --- | ---: | ---: |
-| Deciphered: field meaning and encoding known | 35,649 | **64.86%** |
-| Located inside a known structure, semantics incomplete | 19,317 | **35.14%** |
+| Deciphered: field meaning and encoding known | 37,225 | **67.72%** |
+| Located inside a known structure, semantics incomplete | 17,741 | **32.28%** |
 | Payload not assigned to a specific structure/field | 0 | **0.00%** |
 | **Located in total (includes deciphered)** | **54,966** | **100.00%** |
 
@@ -29,7 +29,7 @@ This is a conservative, byte-weighted inventory of current repository evidence, 
 | Garage-record count | `0x8022`–`0x8026` | 4 | 4 |
 | Six special configurations | `0x8026`–`0x995E` | 6,456 | 6,054 |
 | Special-configuration count | `0x995E`–`0x9962` | 4 | 4 |
-| Eight stage records | `0x9962`–`0xA16A` | 2,056 | 224 |
+| Eight stage records | `0x9962`–`0xA16A` | 2,056 | 1,800 |
 | Career scalars and 384 event records | `0xA16A`–`0xAE9A` | 3,376 | 1,932 |
 | 256 SMS inbox records and controls | `0xAE9A`–`0xC2A3` | 5,129 | 1,288 |
 | Career tail | `0xC2A3`–`0xC447` | 420 | 0 |
@@ -44,9 +44,9 @@ Each career garage record contributes **1,023 deciphered bytes**: its native slo
 
 **Whole-file first pass:** internal native serializers now account for every byte through EOF, including all repeating configurations, stages, events, SMS messages and tail blocks. Original x86 collection/profile/tail instructions passed fixture or constrained synthetic routing checks; the career loader intentionally resets four transient dwords, and the SMS loader compacts unresolved definitions and recomputes counts. See [the boundary ledger, normalization rules and validation limits](technical.md#whole-file-first-pass-2026-11-05). Structural coverage is not complete semantic understanding.
 
-**Important correction:** `0xA175` is the **uint32 current career-stage index**, not a garage count. The actual garage-record count is at `0x8022`. The editor's existing replacement path still writes the low byte of `0xA175` under its old name; this research pass documents the hazard but does not change editing behavior.
+**Important correction:** `0xA175` is the **uint32 current career-stage index**, not a garage count. The actual garage-record count is at `0x8022`. Car replacement now preserves the stage field; its old low-byte write has been removed.
 
-The 420 category-unlock offsets are **sparse**, not a contiguous table. Eight overlap the mapped performance ownership bytes; the remaining 412 per car stay amber because individual-part semantics are not established. The ninth ownership byte also stays amber because its visual-purchase interpretation is unverified. Donor-copy blocks, record gaps and zero-filled bytes are not automatically counted as deciphered. The fixed event array has **384 entries**, of which 137 are active in the reference: each name hash (`+0`) and traced status byte (`+6`) is green, while three bytes per entry remain amber. Status values are not universal completion/unlock flags.
+The 420 category-unlock offsets are **sparse**, not a contiguous table. Eight overlap the mapped performance ownership bytes; the remaining 412 per car stay amber because individual-part semantics are not established. The ninth ownership byte also stays amber because its visual-purchase interpretation is unverified. Donor-copy blocks, record gaps and zero-filled bytes are not automatically counted as deciphered. The fixed event array has **384 entries**, of which 137 are active in the reference: each name hash (`+0`) and traced status byte (`+6`) is green, while three bytes per entry remain amber. Shop discovery at `+4` is now verified for shop hashes, but is not promoted across the whole mixed event array: non-shop meanings still need tracing. Status values are not universal completion/unlock flags.
 
 Scope: the repository's `testfile/treav0r` career file, including empty car records; separate ZIP/GARAGE.DAT bytes are excluded. Evidence comes from [layout constants](src/model/layout.ts), [save validation](src/model/save-file.ts), [performance mappings](src/model/perf.ts), [dyno layouts](src/model/dyno.ts), [unlock ranges](src/data/unlock-table.ts), and the serializer/event traces in [technical.md](technical.md). Byte coverage counts overlapping interpretations only once.
 
@@ -62,6 +62,7 @@ The generator checks the reference file's structure and checksums, compatibility
 ## Features
 
 - Edit driver name and money, with checksums recalculated on download.
+- Career access (experimental): stage selector **0–6**, progression-safe shop discovery, and a separate **Complete career (100%)** action using local `GLOBALB.BUN`. Full completion intentionally changes real event/photo goals and stage results; does not fabricate money, cars or reward ownership. Completed race/photo markers disappear. Dealer-car/part gates are also reported.
 - Open a raw career save or an nfsu2-web backup ZIP; the file type is detected from its contents.
 - View each car slot's make and model, read from the car type hash.
 - Replace or add a car in a slot. Tuning is kept.

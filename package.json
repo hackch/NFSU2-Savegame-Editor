@@ -1,6 +1,6 @@
 {
   "name": "nfsu2-savegame-editor",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "private": true,
   "description": "Static browser editor for Need for Speed: Underground 2 career saves.",
   "type": "module",

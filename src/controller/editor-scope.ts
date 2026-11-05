@@ -4,6 +4,7 @@ import type { SlotState } from '../model/slots.js';
 import type { PerfPart, UniquePerfPart } from '../data/perf-parts.js';
 import type { CurveKind, DynoEvent, ScalarCategory, ScalarRow } from '../model/dyno.js';
 import type { ColorPalette } from '../model/visual.js';
+import type { CareerReport } from '../model/career.js';
 
 /** Result of a donor-list or file-load problem, shown in the status line. */
 export interface Status {
@@ -212,6 +213,7 @@ export interface EditorScope extends angular.IScope {
   perfTotal: number;
   uniqueTotal: number;
   unlockTotal: number;
+  career: { gameName: string; error: string; stage: number | null; report: CareerReport | null };
   swapTarget: Record<number, number | string | undefined>;
   replaceTarget: Record<number, number | string | undefined>;
   donors: Donor[];
@@ -245,6 +247,10 @@ export interface EditorScope extends angular.IScope {
   swapSlots(slot: number): void;
   replaceCar(slot: number): void;
   loadGameData(file: File | null): void;
+  discoverShops(): void;
+  hasDiscoverableShops(): boolean;
+  setCareerStage(): void;
+  completeCareer(): void;
   editVisual(row: VisualRow): void;
   applyVisual(): void;
   discardVisual(): void;

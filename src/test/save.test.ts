@@ -24,8 +24,8 @@ import {
 } from '../model/slots.js';
 import { countUnlocked, countUnlockedCategory, setUnlocks, setUnlockCategory, UNLOCK_COUNT } from '../model/unlocks.js';
 import {
-  MAGIC, HEADER_SIZE, SLOT_BASE, SLOT_COUNT, SLOT_STRIDE, SLOT_USED_OFF, PERF_OFF, MONEY_OFF, GARAGE_CAR_COUNT,
-  SLOT_LOCK_REL, SLOT_BOUGHT_REL, UNIQUE_PERF_OFF,
+  MAGIC, HEADER_SIZE, SLOT_BASE, SLOT_COUNT, SLOT_STRIDE, SLOT_USED_OFF, PERF_OFF, MONEY_OFF, CURRENT_STAGE_OFF,
+  SLOT_LOCK_REL, SLOT_BOUGHT_REL, UNIQUE_PERF_OFF, dataView,
   EXTENDED_SAVE_SIZE, EXTRA_SLOT_RECORD_BASE, PROFILE_SIZE, SLOT_RECORD_END_REL, SLOT_RECORD_REL, slotBase, slotCount,
 } from '../model/layout.js';
 import {
@@ -737,18 +737,19 @@ test('fixture: replacing a car only changes its slot and the checksum bytes', { 
 
 test('fixture: empty slot 5 becomes a bought car without copying another car appearance', { skip: SKIP_NO_FIXTURE }, () => {
   const data = load();
-  assert.equal(data[GARAGE_CAR_COUNT], 4);
+  assert.equal(dataView(data).getUint32(CURRENT_STAGE_OFF, true), 4);
   const out = setSlotCar(data, 4, donorNamed('Mazda Miata MX5'));
   assert.equal(isSlotUsed(out, 4), true);
   assert.equal(identifyCar(carIndex, getCarTypeHash(out, 4))?.name, 'Mazda Miata MX5');
-  assert.equal(out[GARAGE_CAR_COUNT], 5);
+  assert.equal(dataView(out).getUint32(CURRENT_STAGE_OFF, true), 4);
   assert.ok(readVisual(out, 4).slice(153, 163).every((hash) => hash === 0));
 });
 
-test('setSlotCar never lowers the garage count', { skip: SKIP_NO_FIXTURE }, () => {
+test('setSlotCar preserves all four bytes of the career-stage field', { skip: SKIP_NO_FIXTURE }, () => {
   const data = load();
   const out = setSlotCar(data, 0, donorNamed('Toyota Supra'));
-  assert.equal(out[GARAGE_CAR_COUNT], data[GARAGE_CAR_COUNT]);
+  assert.deepEqual(out.subarray(CURRENT_STAGE_OFF, CURRENT_STAGE_OFF + 4),
+    data.subarray(CURRENT_STAGE_OFF, CURRENT_STAGE_OFF + 4));
 });
 
 test('fixture: setSlotCar on a locked slot unlocks it, sets the bought flag and shows it as filled', { skip: SKIP_NO_FIXTURE }, () => {
@@ -816,7 +817,7 @@ test('replacement clears old appearance, all stickers and neon in every career a
       assert.equal(slotState(out, slot), 'filled');
       assert.equal(getCarTypeHash(out, slot), donor.hash);
       assert.ok(diffOffsets(data, out).every((i) =>
-        i >= base && i < base + SLOT_RECORD_END_REL || i === GARAGE_CAR_COUNT), 'only target record changes');
+        i >= base && i < base + SLOT_RECORD_END_REL), 'only target record changes');
     }
   }
   assert.deepEqual(data, original, 'input remains unchanged');
@@ -834,9 +835,9 @@ test('replacement clears stickers and neon even when present in donor variants',
   assert.ok(bytes.every((b) => b === 0xa5), 'donor not mutated');
 });
 
-test('lock state follows each slot\'s own flag, not the garage count', () => {
+test('lock state follows each slot\'s own flag, not the career stage', () => {
   const data = new Uint8Array(0xd300);
-  data[GARAGE_CAR_COUNT] = 1;
+  data[CURRENT_STAGE_OFF] = 1;
   for (let s = 0; s < 5; s++) data[SLOT_BASE + s * SLOT_STRIDE + SLOT_LOCK_REL] = 1;
   assert.deepEqual([0, 1, 2, 3, 4].map((s) => isSlotLocked(data, s)), [true, true, true, true, true]);
   data[SLOT_BASE + 2 * SLOT_STRIDE + SLOT_LOCK_REL] = 0;

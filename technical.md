@@ -79,7 +79,7 @@ The reference's first configuration has identity `0x000AC6D1` (350Z), while the 
 
 ## Whole-file first pass (2026-11-05)
 
-REA/Ghidra traces of the original body writer `FUN_0052A280` and inverse `FUN_005344D0`, with native-instruction checks described below, locate **all 54,966 bytes**. This is a structural first pass, not a claim that copied opaque fields are understood or safe to edit. Coverage is **35,649 deciphered bytes (64.86%)**, **19,317 located but incomplete bytes (35.14%)**, and no unlocated bytes. The first-4-KiB totals above are unchanged.
+REA/Ghidra traces of the original body writer `FUN_0052A280` and inverse `FUN_005344D0`, with native-instruction checks described below, locate **all 54,966 bytes**. This is a structural first pass, not a claim that copied opaque fields are understood or safe to edit. That pass yielded **35,649 deciphered bytes (64.86%)**. The completion trace below decodes another 1,576 bytes (49 result hashes and one completion byte in each of eight stage records): current coverage is **37,225 deciphered (67.72%)**, **17,741 incomplete (32.28%)**, and no unlocated bytes. The first-4-KiB totals are unchanged. Shop discovery at event `+4` is not extrapolated across every mixed event record.
 
 ### Complete boundary ledger
 
@@ -136,10 +136,10 @@ The purchased subobject starts at serialized native car record `+0x432`, or edit
 
 Each saved stage at `0x9962+i*0x101` routes through `FUN_00500FA0` / `FUN_00514400`:
 
-- `[+0,+0xE8)` copies the runtime prefix; most meanings remain unresolved.
+- `[+0,+0xE8)` copies the runtime prefix. The completion trace establishes event-name hash sets at `+0` (35 ordinary races), `+0x8C` (four URLs) and `+0x9C` (ten sponsor races), zero for empty entries. Other prefix fields remain incomplete.
 - `+0xDC` is a uint32 stage outcome counter: `FUN_00541320` increments it for a nonzero outcome in career mode. This alone does **not** establish that it counts only Outrun wins.
 - `+0xE8..+0xFC` contains five uint32 name hashes, replacing runtime pointers to BUN `0x34A19` records (stride `0x10`). `FUN_00512990` resolves them via names in the BUN string blob `0x34A1D`; do not confuse them with unique-event records in `0x34A1B`.
-- `+0xFC` is a copied byte with unresolved gameplay meaning.
+- `+0xFC` is the stage-completion byte: `FUN_00500C00` reads it; `FUN_00532C60` sets it to 1 when stage requirements pass.
 - `+0xFD` is an int32 **sign-extension of the first byte** of the runtime `+0x100` pointed BUN stage-table record. The inverse searches `0x50`-byte records by that ID; `FUN_00512A70` installs the `0x34A18` table. It is not a serialized pointer.
 
 Let `A=0xA16A`. The following ordered spans account for all `0xD30` bytes before the inbox; unknown fields stay amber even when they resemble flags or world coordinates.
@@ -161,9 +161,9 @@ Let `A=0xA16A`. The following ordered spans account for all `0xD30` bytes before
 | `+0xC2C` | 4 | `+0x8764` |
 | `+0xC30` | `0x100` | `+0x8768`: unresolved byte table |
 
-**Correction and editor hazard:** absolute **`0xA175` is a four-byte stage index**, reference value 4, not a one-byte garage count. The actual garage-record count is at **`0x8022`**. The production `GARAGE_CAR_COUNT` name and the low-byte write in `setSlotCar` are legacy misinterpretations that can change progression. This read-only research pass corrects documentation/coverage, not that editing behavior.
+**Correction and editor hazard:** absolute **`0xA175` is a four-byte stage index**, reference value 4, not a one-byte garage count. The actual garage-record count is at **`0x8022`**. The initial research pass identified the legacy `GARAGE_CAR_COUNT` misinterpretation; the career-access implementation has now removed that constant and the low-byte write in `setSlotCar`. Replacement preserves the stage.
 
-The event array is **`[0xA17D,0xAD7D)`**, not just the 137 observed entries. `FUN_00512F10` finds/creates entries by the name hash at `+0` and updates the count. Each status byte at `+6` is traced; the other three bytes stay amber. `FUN_005419C0` writes status 1 after unique selection, while `FUN_00533BE0` writes 2 during setup: these are not established universal "completed"/"unlocked" flags.
+The event array is **`[0xA17D,0xAD7D)`**, not just the 137 observed entries. `FUN_00512F10` finds/creates entries by the name hash at `+0` and updates the count. Status `+6` is traced; three bytes per entry stay amber in the generic grid. Shop discovery at `+4` is confirmed below, but not treated as a universal flag for every event kind. `FUN_005419C0` writes status 1 after unique selection, while `FUN_00533BE0` writes 2 during setup: these are not established universal "completed"/"unlocked" flags.
 
 ### SMS inbox and career-tail normalization
 
@@ -221,6 +221,77 @@ Executed original PE x86 instructions in Unicorn, with no edits to the EXE, BUN 
 - Final SHA-256 checks confirmed the reference save, EXE and BUN were unchanged. All source-save CRCs still pass. No game was launched and no real save was written.
 
 Next semantic targets are the car common-header/configuration gaps and purchased companion fields, the first `0xE8` bytes of each stage, unresolved career scalars, SMS status/payload fields, profile options/statistics, and the final identity-matched objects. Locating their native source is not sufficient to promote them to green.
+
+## Career access gates and editor policy (2026-11-05)
+
+Shop discovery deliberately preserves **both the current stage and completion history**. At the user's request, the editor also exposes separate confirmed stage editing and actual-goal 100% completion. These do not award/fabricate cars, money, collectible cash, SMS or reward ownership.
+
+### City barriers and race markers: why they are not switches here
+
+`FUN_00578060` selects the `BARRIERS_CAREER%d` resource using runtime `DAT_00862838` (career `+0x7AF8`); `FUN_005F54A0` uses the same stage-specific group when rebuilding barriers. That establishes the stage-to-barrier resource dependency, not a separate saved "open city" flag. The stage selector writes only this uint32 field, accepting 0–6. Resource content and full in-game district behavior have not been validated by this pass.
+
+`FUN_00527BB0` filters race candidates by **exact stage equality**, completion, event kind and special-car eligibility. `FUN_00527AA0` supplies per-category caps from the current stage's BUN table. Filling status/discovery flags does not bypass those constraints. `FUN_005141B0` additionally excludes indexed collected rewards when building its marker list; this is not a universal race-marker list. The editor does not reset race statuses or promise simultaneous access to all stages' races.
+
+### Standard shop discovery
+
+The main career BUN container is `0x80034A10`; `FUN_00512C00`'s initialized guard admits the first one. The examined file also contains a later demo career container with different events and stage tables. The parser keeps these separate.
+
+The shop table `0x34A12` has 24 records of `0xA0` bytes. Saved lookup hash is the definition dword `+0x38`, shop type `+0x50`, requires-discovery flag `+0x51`, prerequisite value `+0x74`, prerequisite kind `+0x9C`, and signed minimum-stage byte `+0x9D`. Shop model paths are inline strings at `+0x40`, **not** offsets into the career string blob. Types 1–5 are the 22 standard shops; type 0 (intro home) and type 6 (unique-reward shop, stage 10 in this BUN) are excluded.
+
+`FUN_00513110` requires:
+
+1. Current stage at least the definition's minimum stage.
+2. If `+0x51` is nonzero, an active saved entry matching `+0x38` with **`entry[4]==1`**.
+3. The additional prerequisite predicate `FUN_00512870`:
+
+| Kind at shop `+0x9C` | Requirement |
+|---|---|
+| 0 | None |
+| 1 | Definition `+0x74` event hash passes `FUN_00500B80`: active entry's **status `+6` is exactly 1** |
+| 2 | Count of nonzero results in the definition's stage's ten-dword `+0x9C` set meets `+0x74` |
+| 3 | Count in that stage's 35-dword `+0` set meets `+0x74` |
+| 4 | Count in that stage's four-dword `+0x8C` set meets `+0x74` |
+
+These counts use `FUN_00500520`, `FUN_005004D0`, `FUN_005005A0`, respectively. They are **not** the stage `+0xDC` outcome counter. UI labels these sets sponsors, races and URLs; shop-only discovery leaves the stored individual results unchanged.
+
+`FUN_00512FF0` records shop discovery by setting the corresponding saved event's `+4` byte to 1. The editor evaluates the stage/prerequisites without the discovery requirement, then changes only this byte for eligible shops. Missing shop records are appended within the 384-entry capacity and zero-initialized; existing bytes `+5..+7`, including status, are preserved. The game can issue discovery notifications during gameplay; the editor does not synthesize SMS messages.
+
+### Dealer cars and part progression reports
+
+`FUN_00513C50` builds the car allow-list using the 24 records in `0x34A1F` (stride 12): car hash, prerequisite event hash for game-region branch zero, and prerequisite hash for nonzero branch. `FUN_00570A30` reads runtime region value `DAT_00864F24`; it is not taken from this save. A resolvable prerequisite must have status exactly 1. Missing definitions impose no completion restriction in the native routine. The report shows both branches rather than guessing the user's region. The car browser also checks catalogue inclusion, regional exclusions in `FUN_005022C0`, geometry and other UI conditions; **"Completion gate passed" is not a universal purchasability claim**.
+
+The part table `0x34A1C` contains 86 `0x28`-byte item definitions, each with three 12-byte level records at `+4`, `+0x10`, `+0x1C`. These IDs are not the 68 installed-item indices. `FUN_00515360` takes **item ID in EAX and level in EDI**, choosing the level record via `FUN_00501750`.
+
+| Level-record kind at `+4` | Predicate using its dword `+8` |
+|---|---|
+| 1 | Resolve the shop hash, then call `FUN_00513110` (discovery included) |
+| 2 | Stage in high 16 bits; minimum 35-dword-set count in low 16 bits |
+| 3 | Stage in high 16 bits; minimum ten-dword-set count in low 16 bits |
+| 4 | Stage in high 16 bits; minimum four-dword-set count in low 16 bits |
+| 0, 5, 6 | This native progression predicate returns true |
+
+The report follows normal progression with runtime cheat overrides disabled. It does not claim car compatibility, shop filtering, ownership, price, unique rewards or every regional exclusion is bypassed. Shop discovery never fabricates races/results to satisfy these gates; full completion deliberately records the real BUN-defined goals instead of independently bypassing inventory checks.
+
+### Stage advancement and actual 100% completion
+
+`FUN_00532C60` checks a stage's BUN definition (`0x34A18`, stride `0x50`): if its `+0x28` final-event hash is zero, every main event whose stage byte `+0x37` matches must pass `FUN_005130A0`; otherwise the final event must pass `FUN_00500B80` and required photo goals must pass `FUN_00513490`. Success sets stage `+0xFC=1`, then `FUN_00528320` increments the current stage when it matches the completed stage. Thus completing stage 5 yields **stage 6**, the post-career state; this is not an invalid seventh BUN stage definition.
+
+The game's statistic screen calls original `FUN_00528A60`. Its output `+0x68` (runtime `0x835C68`) is **the count of active saved main-BUN event definitions with status exactly 1, divided by the main BUN's event-definition count**. English/Labels tables associate the screen label hash `0xABBA6482` with `CSTATISTICS_GAME_COMPLETED` ("Game Completion Status"). No separately stored cosmetic percentage is required.
+
+The main BUN has **224** event definitions. `FUN_00541420` marks a won event's status `+6=1`; `FUN_00512F70` records event activation `+4=1`. `FUN_00513390` inserts definition hash `+8` into a stage result set: kind `+0x34=1` into four URLs, kind 2 into ten sponsor results, kind 3 with `+0x0D!=1` into 35 ordinary results. The first empty entry is filled, duplicates encountered during the scan are not inserted, and full sets are capped exactly as in the native function. Completing every main event does not require artificially expanding these result sets.
+
+The **30 photo goals** in `0x34A16` (stride `0x40`) use saved hash `+0x20`, stage `+0x25`; nonzero `+0x35` marks those required by `FUN_00513490`. `FUN_00533680` records a completed photo as saved entry `+4=2, +6=1`. These goals are separate from the 224-event percentage denominator, but are completed for actual stage-goal consistency.
+
+Full completion creates only missing known entries, preserving unrelated saved hashes and bytes `+5/+7`. It marks all main events and photo goals complete, populates the capped hash sets, sets stages 0–5 completion bytes and correctly serialized BUN stage IDs, sets current stage 6, then discovers eligible standard shops. Unknown counters, selected sponsor contracts, reward ownership, cars, cash collectibles, money and SMS are not modified. Missing capacity fails before editing; the action is idempotent. Stage editing alone retains stage-completion flags, so changing to an earlier stage is not a replay/reset.
+
+### Verification
+
+- Compared the TypeScript reports against **original, unhooked x86** `FUN_00512870`, `FUN_00513110` and `FUN_00515360` using actual BUN tables and save-to-runtime routing. Twelve cases covered stages **0–5**, before/after clearing and restoring shop discovery: **3,624 exact boolean comparisons passed**. Only the discovery flag was changed by the editor action; stage and existing status bytes were preserved.
+- All **48** regional dealer-prerequisite lookups matched original `FUN_00500B80`. The complete geometry/region/UI car browser was not emulated.
+- Executed the **complete original `FUN_00528A60`**, without hooks/stubs, on original and editor-completed real data: native percentage changed from **41.9642866% to exactly 100.0%**. All 30 photo lookups, six stage-completion lookups and, for the completed case, every stage's main-event and required-photo predicates passed. All 22 shop and 258 part predicates matched before/after completion. Starting from the unmodified fixture, 224 original `FUN_00513390` insertions produced **byte-identical capped result sets in all six stages**. On this fixture the final report has 284 active entries, 224/224 main events, 30/30 photos, 6/6 completed stages, and no remaining standard-shop, part-progression or dealer-completion gates.
+- Unit tests cover exact count thresholds, status 1 versus other nonzero values, capacity exhaustion/atomic failure, idempotence, byteOffset-aware views, malformed data, exclusion of secondary/demo tables, untouched GARAGE.DAT bytes and valid download CRCs. A real-BUN controller test exercises cancel/confirm, refreshed reports, raw/ZIP download output, profile switching, untouched other archive entries and explicit invalid-BUN errors.
+- Car replacement no longer alters any of the four stage bytes. Replacement tests verify only the target car record changes.
+- Browser smoke test loaded the real save/BUN, rendered 22 shops, 31 active-stock dealer-car rows and 258 part-level rows, and exercised the stage selector/confirmation and full-completion binding/confirmation. It displayed **100.00%, 224/224 events, 6/6 stages and 30/30 photos**, disabled the completed action, and preserved money without JavaScript errors. The game was not launched; shop-marker rendering and complete shop purchases remain **experimental/in-game unverified**. All source artifact hashes stayed unchanged.
 
 ## Three separate kinds of state
 

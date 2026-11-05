@@ -3,7 +3,7 @@ import {
 } from '../data/perf-parts.js';
 import { parseCarDatabase, buildCarIndex, identifyCar, type Donor } from '../model/cars.js';
 import { checkSave, verifyChecksums, recalculateChecksums, getMoney, setMoney, getName, setName } from '../model/save-file.js';
-import { PERF_OFF, PROFILE_SIZE, UNIQUE_PERF_OFF, slotCount } from '../model/layout.js';
+import { CURRENT_STAGE_OFF, dataView, PERF_OFF, PROFILE_SIZE, UNIQUE_PERF_OFF, slotCount } from '../model/layout.js';
 import { GARAGE_MAGIC, buildGarage, findBackupProfiles, mergeGarage, type BackupProfile } from '../model/nfsu2-web.js';
 import { dosDateTime, isZip, readZip, writeZip, type ZipArchive } from '../model/zip.js';
 import { getCarKey, getCarTypeHash, isCarBought, isSlotLocked, isSlotUsed, setSlotCar, setSlotLocked, slotState, swapSlots as swapCarSlots } from '../model/slots.js';
@@ -12,6 +12,7 @@ import {
   setPerfFlag, setPerfFlags, setUniquePerfFlag, uniquePerfOffset, UNIQUE_PERF_COUNT,
 } from '../model/perf.js';
 import { countUnlocked, setUnlocks, UNLOCK_COUNT } from '../model/unlocks.js';
+import { careerReport, completeCareer, discoverCareerShops, parseCareerDatabase, setCareerStage, type CareerDatabase } from '../model/career.js';
 import { TRAFFIC_CARS } from '../data/traffic-cars.js';
 import { setSlotTrafficCar } from '../model/slots.js';
 import { colorPalettes, isVisualColorSlot, parseVisualData, readVisual, VISUAL_SLOTS, VisualCatalog } from '../model/visual.js';
@@ -54,6 +55,7 @@ export function EditorController($scope: EditorScope): void {
   let donorIndex = new Map<number, Donor>();
   let game: GameData | null = null;
   let visuals: VisualCatalog | null = null;
+  let career: CareerDatabase | null = null;
   let visualDraft: Uint8Array | null = null;
   /** Unapplied dyno setups by `slot:setup`; Auto-tune and graph edits both change them. */
   const drafts = new Map<string, { bytes: Uint8Array; band: TuningBand }>();
@@ -71,6 +73,7 @@ export function EditorController($scope: EditorScope): void {
   $scope.perfTotal = TUNING_PERF_INDICES.length;
   $scope.uniqueTotal = UNIQUE_PERF_COUNT;
   $scope.unlockTotal = UNLOCK_COUNT;
+  $scope.career = { gameName: '', error: '', stage: null, report: null };
   $scope.swapTarget = {};
   $scope.replaceTarget = {};
   $scope.donors = [];
@@ -144,12 +147,76 @@ export function EditorController($scope: EditorScope): void {
         unlocked: countUnlocked(bytes, index),
       };
     });
+    rebuildCareer();
     if ($scope.tuning.open) {
       rebuildTuning();
       rebuildDyno();
       rebuildVisual();
     }
   }
+
+  function rebuildCareer(): void {
+    $scope.career.stage = data ? dataView(data).getUint32(CURRENT_STAGE_OFF, true) : null;
+    $scope.career.report = null;
+    if (!data || !career) return;
+    try {
+      $scope.career.report = careerReport(data, career);
+      $scope.career.error = '';
+    } catch (err) {
+      $scope.career.error = errorMessage(err);
+    }
+  }
+
+  $scope.discoverShops = function (): void {
+    if (!data || !career || !$scope.career.report) {
+      setStatus('error', 'Load a supported career save and GLOBAL\\GLOBALB.BUN first.');
+      return;
+    }
+    const count = $scope.career.report.shops.filter((shop) => shop.discoverable).length;
+    if (!count) {
+      setStatus('success', 'No eligible undiscovered shops remain at this stage.');
+      return;
+    }
+    if (!confirm(`Discover ${count} eligible shops?\n\nOnly shop discovery entries change. Your stage, race completions, result counts, money and car data are preserved. Future-stage shops and locked inventory stay locked. Test with a backup.`)) return;
+    try {
+      applyResult(discoverCareerShops(data, career));
+      setStatus('success', `${count} eligible shops discovered. Download to save; test in game with a backup.`);
+    } catch (err) {
+      setStatus('error', errorMessage(err));
+    }
+  };
+
+  $scope.hasDiscoverableShops = function (): boolean {
+    return $scope.career.report?.shops.some((shop) => shop.discoverable) ?? false;
+  };
+
+  $scope.setCareerStage = function (): void {
+    if (!data || $scope.career.stage === null) {
+      setStatus('error', 'Load a supported career save first.');
+      return;
+    }
+    if (!confirm(`Set career stage to ${$scope.career.stage}?\n\nThis changes road barriers and active-stage eligibility. It does not reset completed stages/races, satisfy prerequisites or grant rewards. Stage 6 is post-career. Test with a backup.`)) return;
+    try {
+      applyResult(setCareerStage(data, $scope.career.stage));
+      setStatus('success', 'Career stage changed. Download to save; test in game with a backup.');
+    } catch (err) {
+      setStatus('error', errorMessage(err));
+    }
+  };
+
+  $scope.completeCareer = function (): void {
+    if (!data || !career || !$scope.career.report) {
+      setStatus('error', 'Load a supported career save and GLOBAL\\GLOBALB.BUN first.');
+      return;
+    }
+    if (!confirm('Complete the career to 100%?\n\nThis intentionally marks all BUN career events and photo goals complete, populates capped stage-result sets, marks stages complete and sets post-career stage 6. Completed race/photo markers disappear. Eligible shops are discovered. Money, cars, collectible cash, SMS and reward ownership are not fabricated. This overwrites completion history; use a backup.')) return;
+    try {
+      applyResult(completeCareer(data, career));
+      setStatus('success', 'Career goals completed (100%), stage 6. Download to save; test in game with a backup.');
+    } catch (err) {
+      setStatus('error', errorMessage(err));
+    }
+  };
 
   function rebuildTuning(): void {
     if (!data) return;
@@ -668,19 +735,35 @@ export function EditorController($scope: EditorScope): void {
           visuals = nextVisuals;
           $scope.tuning.dyno.gameName = file.name;
           $scope.tuning.dyno.gameError = '';
+          try {
+            career = parseCareerDatabase(bytes, nextGame.cars);
+            $scope.career.gameName = file.name;
+            $scope.career.error = '';
+          } catch (err) {
+            career = null;
+            $scope.career.gameName = '';
+            $scope.career.error = errorMessage(err);
+          }
         } catch (err) {
           game = null;
           visuals = null;
           $scope.tuning.dyno.gameName = '';
           $scope.tuning.dyno.gameError = errorMessage(err);
+          career = null;
+          $scope.career.gameName = '';
+          $scope.career.error = errorMessage(err);
         }
         drafts.clear();
         visualDraft = null;
         rebuildDyno();
         rebuildVisual();
+        rebuildCareer();
       });
     };
-    reader.onerror = () => $scope.$apply(() => { $scope.tuning.dyno.gameError = 'Could not read the file.'; });
+    reader.onerror = () => $scope.$apply(() => {
+      $scope.tuning.dyno.gameError = 'Could not read the file.';
+      $scope.career.error = 'Could not read the file.';
+    });
     reader.readAsArrayBuffer(file);
   };
 

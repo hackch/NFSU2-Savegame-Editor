@@ -141,12 +141,16 @@ for (let i = 0; i < 6; i++) {
 mark(0x995e, 4, 2, 'Special-configuration count');
 for (let i = 0; i < 8; i++) {
   const base = 0x9962 + i * 0x101;
+  mark(base, 35 * 4, 2, `Stage ${i}: completed ordinary-race hashes`);
+  mark(base + 0x8c, 4 * 4, 2, `Stage ${i}: completed URL hashes`);
+  mark(base + 0x9c, 10 * 4, 2, `Stage ${i}: completed sponsor-race hashes`);
   mark(base + 0xdc, 4, 2, `Stage ${i + 1}: outcome counter`);
   mark(base + 0xe8, 20, 2, `Stage ${i + 1}: five BUN event-reference name hashes`);
+  mark(base + 0xfc, 1, 2, `Stage ${i}: completion flag`);
   mark(base + 0xfd, 4, 2, `Stage ${i + 1}: sign-extended BUN table record ID`);
 }
 mark(MONEY_OFF, 4, 2, 'Career money');
-mark(0xa175, 4, 2, 'Current career-stage index, uint32 LE (legacy editor name is incorrect)');
+mark(0xa175, 4, 2, 'Current career-stage index, uint32 LE');
 mark(0xa179, 4, 2, 'Event entry count');
 for (let i = 0; i < eventCapacity; i++) {
   mark(eventStart + i * 8, 4, 2, 'Event-name hash');

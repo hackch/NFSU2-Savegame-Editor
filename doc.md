@@ -50,7 +50,24 @@ This overview omits individual unresolved scalar fields; [the complete serialize
 - The implementation is `nfsu2Crc` in [src/model/checksum.ts](src/model/checksum.ts).
 - Each save write must recalculate all three CRCs. The editor does this on download.
 
-The first 4 KiB and the subsequent whole-file pass are traced in [technical.md](technical.md#first-4-kib-trace-2026-11-05). The native header's bytes `0x06`–`0x07` are the upper half of its uint32 file length, not a separate unknown field. Block A is a compatibility descriptor; its tag is checked for equality with `0x10D`, but no decimal "version 269" meaning is established. Structural coverage is now complete; 35.14% of bytes remain semantically incomplete.
+The first 4 KiB and the subsequent whole-file pass are traced in [technical.md](technical.md#first-4-kib-trace-2026-11-05). The native header's bytes `0x06`–`0x07` are the upper half of its uint32 file length, not a separate unknown field. Block A is a compatibility descriptor; its tag is checked for equality with `0x10D`, but no decimal "version 269" meaning is established. Structural coverage is complete; 32.28% of bytes remain semantically incomplete after decoding stage result hashes and completion flags. The grid conservatively does not promote all mixed event entries' `+4` bytes based on shop-only discovery evidence.
+
+## Career access
+
+The experimental **Discover eligible shops** action uses the first career database in the user's local `GLOBALB.BUN`. The file also contains a secondary/demo career container; its tables must not overwrite the main career tables.
+
+- Preserves the current stage, race status bytes, all existing event fields except eligible shops' `+4` discovery flags, stage-result tables, money and car records.
+- Selects standard shop types 1–5 only: performance, body, paint, car dealers and specialties. Intro/unique-reward shops are excluded.
+- Requires the shop's stage and additional event/result-count gates to pass already. Never fabricates completions or unlocks future-stage shops.
+- If a shop has no active event entry, appends a zero-initialized eight-byte record with its hash and discovery byte 1, raising only the active event count. Fails atomically if the 384-entry table has no space.
+- Shows dealer-car prerequisites for both game-region branches and part progression requirements. "Gate passed" is not a guarantee that every car/part fits every shop or car.
+- Uses the existing download/checksum flow for raw career saves and nfsu2-web profiles; separate GARAGE.DAT records are untouched.
+
+**Apply stage** writes only the uint32 current stage: 0 (intro), 1–5 (normal career), 6 (post-career). No BUN is required for that operation. It changes stage-dependent road/race gates without satisfying prerequisites or resetting prior stage-completion flags. Selecting an earlier stage is therefore not a full replay/reset operation.
+
+**Complete career (100%)** is a separate confirmed operation requiring the six-stage main BUN. It marks all 224 main career definitions and 30 photo goals complete, populates native capped race/URL/sponsor result sets, marks stages 0–5 complete, sets stage 6 and discovers eligible standard shops. Existing unrelated event entries, unknown event bytes, money, cars, collectible cash, SMS and reward ownership remain untouched. Capacity failure is atomic. The displayed game percentage is computed from completed main career definitions, not an independently overwritten cosmetic percentage.
+
+Full completion intentionally changes completion history and hides completed race/photo markers. It is not an all-races-visible switch and does not run the game's reward/notification effects. Exact native completion statistics, stage requirements and part predicates have been checked; actual in-game rendering/purchases remain experimental. See [native gate evidence and validation](technical.md#career-access-gates-and-editor-policy-2026-11-05).
 
 ## Car slots
 
@@ -103,7 +120,7 @@ The first 4 KiB and the subsequent whole-file pass are traced in [technical.md](
 
 - A slot is locked when its own lock flag is non-zero: `isSlotLocked` reads the byte at `slot base + 0x428`. `1` is locked, `0` is unlocked.
 - Confirmed in game: with the flag cleared on records 1–4 of `treav1r`, all 5 slots show unlocked and cars work. The previous experiment changing `0xA175` did not change the lock; it was changing the low byte of the **career stage**, not a garage count.
-- **Existing editor hazard:** `setSlotCar` still raises the byte at `0xA175` under the legacy `GARAGE_CAR_COUNT` name. Native `FUN_00514530` / `FUN_00529230` serialize this as a four-byte current-stage field; the real garage-record count is `0x8022`. That legacy write can change career progression. It is not part of the lock check and has not been changed by this research-only pass.
+- **Corrected editor hazard:** the legacy `setSlotCar` low-byte write at `0xA175` has been removed. Native `FUN_00514530` / `FUN_00529230` serialize this as a four-byte current-stage field; the real garage-record count is `0x8022`. Replacement now preserves all four stage bytes.
 - The byte at `+0x429` is `hasCarBought` (strong evidence, not yet confirmed by an editor write in game). `isCarBought` reads it. `1` means a car is bought. Owned cars in `treav0r` and `Jane` all have `01` there.
 - Slot state shown in the UI (`slotState`): locked takes priority. Otherwise a bought car is `filled`, and an unlocked slot with no bought car is `open` (free for a sponsor car).
 - `setSlotCar` clears the lock flag and sets the bought flag on the slot it writes.
@@ -112,7 +129,10 @@ The first 4 KiB and the subsequent whole-file pass are traced in [technical.md](
 
 | Operation | What it writes |
 | --- | --- |
-| Replace car | Clears visual hashes, writes donor blocks 1–3, clears vinyls/colours, decal textures and neon/frame. Performance flags are zeroed; dyno setups are retained. No appearance is copied from a neighboring slot. Clears the lock flag and sets the bought flag. **Legacy code also raises the low byte of the current-stage field at `0xA175` to at most 6; this is not a garage count** |
+| Replace car | Clears visual hashes, writes donor blocks 1–3, clears vinyls/colours, decal textures and neon/frame. Performance flags are zeroed; dyno setups are retained. No appearance is copied from a neighboring slot. Clears the lock flag and sets the bought flag. **Preserves the career stage** |
+| Discover eligible shops | Only eligible shop discovery bytes, newly appended shop entries and the active event count; no stage advancement or fabricated results |
+| Apply stage | Only uint32 `0xA175`; stages 0–6. Keeps event history, stage flags and results |
+| Complete career (100%) | BUN-defined event/photo statuses and activation bytes, capped stage result hashes, stage completion bytes/BUN stage IDs, stage 6 and eligible shop discovery. No reward ownership, money or car writes |
 | Swap slots | Exchanges bytes from the shifted slot base to the native record end, preserving each record's first eight bytes and handle (**experimental**, untested in game) |
 | Set money / name | Only the target field. Input values are never mutated |
 

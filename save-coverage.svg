@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="920" height="785" viewBox="0 0 920 785" role="img" aria-labelledby="title desc">
 <title id="title">NFSU2 career save discovery grid</title>
-<desc id="desc">54,966 bytes. Unlocated payload: 0 bytes (0.00%); Located, incomplete semantics: 19,317 bytes (35.14%); Deciphered fields: 35,649 bytes (64.86%). Read left to right, top to bottom; each cell is 64 bytes. Mixed cells show exact byte proportions.</desc>
+<desc id="desc">54,966 bytes. Unlocated payload: 0 bytes (0.00%); Located, incomplete semantics: 17,741 bytes (32.28%); Deciphered fields: 37,225 bytes (67.72%). Read left to right, top to bottom; each cell is 64 bytes. Mixed cells show exact byte proportions.</desc>
 <rect width="100%" height="100%" fill="#0f172a"/>
 <g font-family="sans-serif" fill="#f8fafc">
 <text x="24" y="32" font-size="22" font-weight="bold">How much of the career save have we deciphered?</text>
@@ -9,9 +9,9 @@
 <rect x="24" y="98" width="14" height="14" fill="#334155"/>
 <text x="46" y="110" font-size="13">Unlocated payload: 0 bytes (0.00%)</text>
 <rect x="24" y="121" width="14" height="14" fill="#f59e0b"/>
-<text x="46" y="133" font-size="13">Located, incomplete semantics: 19,317 bytes (35.14%)</text>
+<text x="46" y="133" font-size="13">Located, incomplete semantics: 17,741 bytes (32.28%)</text>
 <rect x="24" y="144" width="14" height="14" fill="#10b981"/>
-<text x="46" y="156" font-size="13">Deciphered fields: 35,649 bytes (64.86%)</text>
+<text x="46" y="156" font-size="13">Deciphered fields: 37,225 bytes (67.72%)</text>
 <text x="24" y="184" font-size="13">32 cells per row x 64 bytes = 2,048 bytes per row. Mixed colours are byte proportions.</text>
 <text x="24" y="215" font-family="monospace" font-size="12">0x0000</text>
 <g><title>0x0000-0x003F: 0 Unlocated payload, 12 Located, incomplete semantics, 52 Deciphered fields; Header; Compatibility descriptor; Stock catalogue and active count; Magic, uint32 file length, block lengths and three CRCs; Compatibility tag 0x10D and body size; Stock 1: STOCK_&lt;name&gt; handle; Stock 1: enumeration-enabled flag; Stock 1: record-type mask (stock = 1); Stock 1: BUN car index (-1 when unassigned)</title>
@@ -2018,116 +2018,122 @@
 <g><title>0x9900-0x993F: 0 Unlocated payload, 0 Located, incomplete semantics, 64 Deciphered fields; Six special configurations; Special 6: five dyno setups</title>
 <rect x="196" y="582" width="22" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9940-0x997F: 0 Unlocated payload, 41 Located, incomplete semantics, 23 Deciphered fields; Six special configurations; Special-configuration count; Eight stage records; Special 6: five dyno setups</title>
-<rect x="220" y="582" width="14.09375" height="18" fill="#f59e0b"/>
-<rect x="234.09375" y="582" width="7.90625" height="18" fill="#10b981"/>
+<g><title>0x9940-0x997F: 0 Unlocated payload, 11 Located, incomplete semantics, 53 Deciphered fields; Six special configurations; Special-configuration count; Eight stage records; Special 6: five dyno setups; Stage 0: completed ordinary-race hashes</title>
+<rect x="220" y="582" width="3.78125" height="18" fill="#f59e0b"/>
+<rect x="223.78125" y="582" width="18.21875" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9980-0x99BF: 0 Unlocated payload, 64 Located, incomplete semantics, 0 Deciphered fields; Eight stage records</title>
-<rect x="244" y="582" width="22" height="18" fill="#f59e0b"/>
+<g><title>0x9980-0x99BF: 0 Unlocated payload, 0 Located, incomplete semantics, 64 Deciphered fields; Eight stage records; Stage 0: completed ordinary-race hashes</title>
+<rect x="244" y="582" width="22" height="18" fill="#10b981"/>
 </g>
-<g><title>0x99C0-0x99FF: 0 Unlocated payload, 64 Located, incomplete semantics, 0 Deciphered fields; Eight stage records</title>
-<rect x="268" y="582" width="22" height="18" fill="#f59e0b"/>
+<g><title>0x99C0-0x99FF: 0 Unlocated payload, 0 Located, incomplete semantics, 64 Deciphered fields; Eight stage records; Stage 0: completed ordinary-race hashes; Stage 0: completed URL hashes; Stage 0: completed sponsor-race hashes</title>
+<rect x="268" y="582" width="22" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9A00-0x9A3F: 0 Unlocated payload, 62 Located, incomplete semantics, 2 Deciphered fields; Eight stage records; Stage 1: outcome counter</title>
-<rect x="292" y="582" width="21.3125" height="18" fill="#f59e0b"/>
-<rect x="313.3125" y="582" width="0.6875" height="18" fill="#10b981"/>
+<g><title>0x9A00-0x9A3F: 0 Unlocated payload, 24 Located, incomplete semantics, 40 Deciphered fields; Eight stage records; Stage 0: completed sponsor-race hashes; Stage 1: outcome counter</title>
+<rect x="292" y="582" width="8.25" height="18" fill="#f59e0b"/>
+<rect x="300.25" y="582" width="13.75" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9A40-0x9A7F: 0 Unlocated payload, 38 Located, incomplete semantics, 26 Deciphered fields; Eight stage records; Stage 1: outcome counter; Stage 1: five BUN event-reference name hashes; Stage 1: sign-extended BUN table record ID</title>
-<rect x="316" y="582" width="13.0625" height="18" fill="#f59e0b"/>
-<rect x="329.0625" y="582" width="8.9375" height="18" fill="#10b981"/>
+<g><title>0x9A40-0x9A7F: 0 Unlocated payload, 8 Located, incomplete semantics, 56 Deciphered fields; Eight stage records; Stage 1: outcome counter; Stage 1: five BUN event-reference name hashes; Stage 0: completion flag; Stage 1: sign-extended BUN table record ID; Stage 1: completed ordinary-race hashes</title>
+<rect x="316" y="582" width="2.75" height="18" fill="#f59e0b"/>
+<rect x="318.75" y="582" width="19.25" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9A80-0x9ABF: 0 Unlocated payload, 64 Located, incomplete semantics, 0 Deciphered fields; Eight stage records</title>
-<rect x="340" y="582" width="22" height="18" fill="#f59e0b"/>
+<g><title>0x9A80-0x9ABF: 0 Unlocated payload, 0 Located, incomplete semantics, 64 Deciphered fields; Eight stage records; Stage 1: completed ordinary-race hashes</title>
+<rect x="340" y="582" width="22" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9AC0-0x9AFF: 0 Unlocated payload, 64 Located, incomplete semantics, 0 Deciphered fields; Eight stage records</title>
-<rect x="364" y="582" width="22" height="18" fill="#f59e0b"/>
+<g><title>0x9AC0-0x9AFF: 0 Unlocated payload, 0 Located, incomplete semantics, 64 Deciphered fields; Eight stage records; Stage 1: completed ordinary-race hashes; Stage 1: completed URL hashes; Stage 1: completed sponsor-race hashes</title>
+<rect x="364" y="582" width="22" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9B00-0x9B3F: 0 Unlocated payload, 63 Located, incomplete semantics, 1 Deciphered fields; Eight stage records; Stage 2: outcome counter</title>
-<rect x="388" y="582" width="21.65625" height="18" fill="#f59e0b"/>
-<rect x="409.65625" y="582" width="0.34375" height="18" fill="#10b981"/>
+<g><title>0x9B00-0x9B3F: 0 Unlocated payload, 24 Located, incomplete semantics, 40 Deciphered fields; Eight stage records; Stage 1: completed sponsor-race hashes; Stage 2: outcome counter</title>
+<rect x="388" y="582" width="8.25" height="18" fill="#f59e0b"/>
+<rect x="396.25" y="582" width="13.75" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9B40-0x9B7F: 0 Unlocated payload, 37 Located, incomplete semantics, 27 Deciphered fields; Eight stage records; Stage 2: outcome counter; Stage 2: five BUN event-reference name hashes; Stage 2: sign-extended BUN table record ID</title>
-<rect x="412" y="582" width="12.71875" height="18" fill="#f59e0b"/>
-<rect x="424.71875" y="582" width="9.28125" height="18" fill="#10b981"/>
+<g><title>0x9B40-0x9B7F: 0 Unlocated payload, 8 Located, incomplete semantics, 56 Deciphered fields; Eight stage records; Stage 2: outcome counter; Stage 2: five BUN event-reference name hashes; Stage 1: completion flag; Stage 2: sign-extended BUN table record ID; Stage 2: completed ordinary-race hashes</title>
+<rect x="412" y="582" width="2.75" height="18" fill="#f59e0b"/>
+<rect x="414.75" y="582" width="19.25" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9B80-0x9BBF: 0 Unlocated payload, 64 Located, incomplete semantics, 0 Deciphered fields; Eight stage records</title>
-<rect x="436" y="582" width="22" height="18" fill="#f59e0b"/>
+<g><title>0x9B80-0x9BBF: 0 Unlocated payload, 0 Located, incomplete semantics, 64 Deciphered fields; Eight stage records; Stage 2: completed ordinary-race hashes</title>
+<rect x="436" y="582" width="22" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9BC0-0x9BFF: 0 Unlocated payload, 64 Located, incomplete semantics, 0 Deciphered fields; Eight stage records</title>
-<rect x="460" y="582" width="22" height="18" fill="#f59e0b"/>
+<g><title>0x9BC0-0x9BFF: 0 Unlocated payload, 0 Located, incomplete semantics, 64 Deciphered fields; Eight stage records; Stage 2: completed ordinary-race hashes; Stage 2: completed URL hashes</title>
+<rect x="460" y="582" width="22" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9C00-0x9C3F: 0 Unlocated payload, 64 Located, incomplete semantics, 0 Deciphered fields; Eight stage records</title>
-<rect x="484" y="582" width="22" height="18" fill="#f59e0b"/>
+<g><title>0x9C00-0x9C3F: 0 Unlocated payload, 24 Located, incomplete semantics, 40 Deciphered fields; Eight stage records; Stage 2: completed sponsor-race hashes</title>
+<rect x="484" y="582" width="8.25" height="18" fill="#f59e0b"/>
+<rect x="492.25" y="582" width="13.75" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9C40-0x9C7F: 0 Unlocated payload, 36 Located, incomplete semantics, 28 Deciphered fields; Eight stage records; Stage 3: outcome counter; Stage 3: five BUN event-reference name hashes; Stage 3: sign-extended BUN table record ID</title>
-<rect x="508" y="582" width="12.375" height="18" fill="#f59e0b"/>
-<rect x="520.375" y="582" width="9.625" height="18" fill="#10b981"/>
+<g><title>0x9C40-0x9C7F: 0 Unlocated payload, 8 Located, incomplete semantics, 56 Deciphered fields; Eight stage records; Stage 3: outcome counter; Stage 3: five BUN event-reference name hashes; Stage 2: completion flag; Stage 3: sign-extended BUN table record ID; Stage 3: completed ordinary-race hashes</title>
+<rect x="508" y="582" width="2.75" height="18" fill="#f59e0b"/>
+<rect x="510.75" y="582" width="19.25" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9C80-0x9CBF: 0 Unlocated payload, 64 Located, incomplete semantics, 0 Deciphered fields; Eight stage records</title>
-<rect x="532" y="582" width="22" height="18" fill="#f59e0b"/>
+<g><title>0x9C80-0x9CBF: 0 Unlocated payload, 0 Located, incomplete semantics, 64 Deciphered fields; Eight stage records; Stage 3: completed ordinary-race hashes</title>
+<rect x="532" y="582" width="22" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9CC0-0x9CFF: 0 Unlocated payload, 64 Located, incomplete semantics, 0 Deciphered fields; Eight stage records</title>
-<rect x="556" y="582" width="22" height="18" fill="#f59e0b"/>
+<g><title>0x9CC0-0x9CFF: 0 Unlocated payload, 0 Located, incomplete semantics, 64 Deciphered fields; Eight stage records; Stage 3: completed ordinary-race hashes; Stage 3: completed URL hashes</title>
+<rect x="556" y="582" width="22" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9D00-0x9D3F: 0 Unlocated payload, 64 Located, incomplete semantics, 0 Deciphered fields; Eight stage records</title>
-<rect x="580" y="582" width="22" height="18" fill="#f59e0b"/>
+<g><title>0x9D00-0x9D3F: 0 Unlocated payload, 23 Located, incomplete semantics, 41 Deciphered fields; Eight stage records; Stage 3: completed URL hashes; Stage 3: completed sponsor-race hashes</title>
+<rect x="580" y="582" width="7.90625" height="18" fill="#f59e0b"/>
+<rect x="587.90625" y="582" width="14.09375" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9D40-0x9D7F: 0 Unlocated payload, 36 Located, incomplete semantics, 28 Deciphered fields; Eight stage records; Stage 4: outcome counter; Stage 4: five BUN event-reference name hashes; Stage 4: sign-extended BUN table record ID</title>
-<rect x="604" y="582" width="12.375" height="18" fill="#f59e0b"/>
-<rect x="616.375" y="582" width="9.625" height="18" fill="#10b981"/>
+<g><title>0x9D40-0x9D7F: 0 Unlocated payload, 9 Located, incomplete semantics, 55 Deciphered fields; Eight stage records; Stage 4: outcome counter; Stage 4: five BUN event-reference name hashes; Stage 3: completion flag; Stage 4: sign-extended BUN table record ID; Stage 4: completed ordinary-race hashes</title>
+<rect x="604" y="582" width="3.09375" height="18" fill="#f59e0b"/>
+<rect x="607.09375" y="582" width="18.90625" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9D80-0x9DBF: 0 Unlocated payload, 64 Located, incomplete semantics, 0 Deciphered fields; Eight stage records</title>
-<rect x="628" y="582" width="22" height="18" fill="#f59e0b"/>
+<g><title>0x9D80-0x9DBF: 0 Unlocated payload, 0 Located, incomplete semantics, 64 Deciphered fields; Eight stage records; Stage 4: completed ordinary-race hashes</title>
+<rect x="628" y="582" width="22" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9DC0-0x9DFF: 0 Unlocated payload, 64 Located, incomplete semantics, 0 Deciphered fields; Eight stage records</title>
-<rect x="652" y="582" width="22" height="18" fill="#f59e0b"/>
+<g><title>0x9DC0-0x9DFF: 0 Unlocated payload, 0 Located, incomplete semantics, 64 Deciphered fields; Eight stage records; Stage 4: completed ordinary-race hashes; Stage 4: completed URL hashes</title>
+<rect x="652" y="582" width="22" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9E00-0x9E3F: 0 Unlocated payload, 64 Located, incomplete semantics, 0 Deciphered fields; Eight stage records</title>
-<rect x="676" y="582" width="22" height="18" fill="#f59e0b"/>
+<g><title>0x9E00-0x9E3F: 0 Unlocated payload, 22 Located, incomplete semantics, 42 Deciphered fields; Eight stage records; Stage 4: completed URL hashes; Stage 4: completed sponsor-race hashes</title>
+<rect x="676" y="582" width="7.5625" height="18" fill="#f59e0b"/>
+<rect x="683.5625" y="582" width="14.4375" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9E40-0x9E7F: 0 Unlocated payload, 36 Located, incomplete semantics, 28 Deciphered fields; Eight stage records; Stage 5: outcome counter; Stage 5: five BUN event-reference name hashes; Stage 5: sign-extended BUN table record ID</title>
-<rect x="700" y="582" width="12.375" height="18" fill="#f59e0b"/>
-<rect x="712.375" y="582" width="9.625" height="18" fill="#10b981"/>
+<g><title>0x9E40-0x9E7F: 0 Unlocated payload, 10 Located, incomplete semantics, 54 Deciphered fields; Eight stage records; Stage 5: outcome counter; Stage 5: five BUN event-reference name hashes; Stage 4: completion flag; Stage 5: sign-extended BUN table record ID; Stage 5: completed ordinary-race hashes</title>
+<rect x="700" y="582" width="3.4375" height="18" fill="#f59e0b"/>
+<rect x="703.4375" y="582" width="18.5625" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9E80-0x9EBF: 0 Unlocated payload, 64 Located, incomplete semantics, 0 Deciphered fields; Eight stage records</title>
-<rect x="724" y="582" width="22" height="18" fill="#f59e0b"/>
+<g><title>0x9E80-0x9EBF: 0 Unlocated payload, 0 Located, incomplete semantics, 64 Deciphered fields; Eight stage records; Stage 5: completed ordinary-race hashes</title>
+<rect x="724" y="582" width="22" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9EC0-0x9EFF: 0 Unlocated payload, 64 Located, incomplete semantics, 0 Deciphered fields; Eight stage records</title>
-<rect x="748" y="582" width="22" height="18" fill="#f59e0b"/>
+<g><title>0x9EC0-0x9EFF: 0 Unlocated payload, 0 Located, incomplete semantics, 64 Deciphered fields; Eight stage records; Stage 5: completed ordinary-race hashes; Stage 5: completed URL hashes</title>
+<rect x="748" y="582" width="22" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9F00-0x9F3F: 0 Unlocated payload, 64 Located, incomplete semantics, 0 Deciphered fields; Eight stage records</title>
-<rect x="772" y="582" width="22" height="18" fill="#f59e0b"/>
+<g><title>0x9F00-0x9F3F: 0 Unlocated payload, 21 Located, incomplete semantics, 43 Deciphered fields; Eight stage records; Stage 5: completed URL hashes; Stage 5: completed sponsor-race hashes</title>
+<rect x="772" y="582" width="7.21875" height="18" fill="#f59e0b"/>
+<rect x="779.21875" y="582" width="14.78125" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9F40-0x9F7F: 0 Unlocated payload, 36 Located, incomplete semantics, 28 Deciphered fields; Eight stage records; Stage 6: outcome counter; Stage 6: five BUN event-reference name hashes; Stage 6: sign-extended BUN table record ID</title>
-<rect x="796" y="582" width="12.375" height="18" fill="#f59e0b"/>
-<rect x="808.375" y="582" width="9.625" height="18" fill="#10b981"/>
+<g><title>0x9F40-0x9F7F: 0 Unlocated payload, 11 Located, incomplete semantics, 53 Deciphered fields; Eight stage records; Stage 6: outcome counter; Stage 6: five BUN event-reference name hashes; Stage 5: completion flag; Stage 6: sign-extended BUN table record ID; Stage 6: completed ordinary-race hashes</title>
+<rect x="796" y="582" width="3.78125" height="18" fill="#f59e0b"/>
+<rect x="799.78125" y="582" width="18.21875" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9F80-0x9FBF: 0 Unlocated payload, 64 Located, incomplete semantics, 0 Deciphered fields; Eight stage records</title>
-<rect x="820" y="582" width="22" height="18" fill="#f59e0b"/>
+<g><title>0x9F80-0x9FBF: 0 Unlocated payload, 0 Located, incomplete semantics, 64 Deciphered fields; Eight stage records; Stage 6: completed ordinary-race hashes</title>
+<rect x="820" y="582" width="22" height="18" fill="#10b981"/>
 </g>
-<g><title>0x9FC0-0x9FFF: 0 Unlocated payload, 64 Located, incomplete semantics, 0 Deciphered fields; Eight stage records</title>
-<rect x="844" y="582" width="22" height="18" fill="#f59e0b"/>
+<g><title>0x9FC0-0x9FFF: 0 Unlocated payload, 0 Located, incomplete semantics, 64 Deciphered fields; Eight stage records; Stage 6: completed ordinary-race hashes; Stage 6: completed URL hashes</title>
+<rect x="844" y="582" width="22" height="18" fill="#10b981"/>
 </g>
 <text x="24" y="615" font-family="monospace" font-size="12">0xA000</text>
-<g><title>0xA000-0xA03F: 0 Unlocated payload, 64 Located, incomplete semantics, 0 Deciphered fields; Eight stage records</title>
-<rect x="100" y="602" width="22" height="18" fill="#f59e0b"/>
+<g><title>0xA000-0xA03F: 0 Unlocated payload, 20 Located, incomplete semantics, 44 Deciphered fields; Eight stage records; Stage 6: completed URL hashes; Stage 6: completed sponsor-race hashes</title>
+<rect x="100" y="602" width="6.875" height="18" fill="#f59e0b"/>
+<rect x="106.875" y="602" width="15.125" height="18" fill="#10b981"/>
 </g>
-<g><title>0xA040-0xA07F: 0 Unlocated payload, 36 Located, incomplete semantics, 28 Deciphered fields; Eight stage records; Stage 7: outcome counter; Stage 7: five BUN event-reference name hashes; Stage 7: sign-extended BUN table record ID</title>
-<rect x="124" y="602" width="12.375" height="18" fill="#f59e0b"/>
-<rect x="136.375" y="602" width="9.625" height="18" fill="#10b981"/>
+<g><title>0xA040-0xA07F: 0 Unlocated payload, 12 Located, incomplete semantics, 52 Deciphered fields; Eight stage records; Stage 7: outcome counter; Stage 7: five BUN event-reference name hashes; Stage 6: completion flag; Stage 7: sign-extended BUN table record ID; Stage 7: completed ordinary-race hashes</title>
+<rect x="124" y="602" width="4.125" height="18" fill="#f59e0b"/>
+<rect x="128.125" y="602" width="17.875" height="18" fill="#10b981"/>
 </g>
-<g><title>0xA080-0xA0BF: 0 Unlocated payload, 64 Located, incomplete semantics, 0 Deciphered fields; Eight stage records</title>
-<rect x="148" y="602" width="22" height="18" fill="#f59e0b"/>
+<g><title>0xA080-0xA0BF: 0 Unlocated payload, 0 Located, incomplete semantics, 64 Deciphered fields; Eight stage records; Stage 7: completed ordinary-race hashes</title>
+<rect x="148" y="602" width="22" height="18" fill="#10b981"/>
 </g>
-<g><title>0xA0C0-0xA0FF: 0 Unlocated payload, 64 Located, incomplete semantics, 0 Deciphered fields; Eight stage records</title>
-<rect x="172" y="602" width="22" height="18" fill="#f59e0b"/>
+<g><title>0xA0C0-0xA0FF: 0 Unlocated payload, 0 Located, incomplete semantics, 64 Deciphered fields; Eight stage records; Stage 7: completed ordinary-race hashes; Stage 7: completed URL hashes</title>
+<rect x="172" y="602" width="22" height="18" fill="#10b981"/>
 </g>
-<g><title>0xA100-0xA13F: 0 Unlocated payload, 64 Located, incomplete semantics, 0 Deciphered fields; Eight stage records</title>
-<rect x="196" y="602" width="22" height="18" fill="#f59e0b"/>
+<g><title>0xA100-0xA13F: 0 Unlocated payload, 19 Located, incomplete semantics, 45 Deciphered fields; Eight stage records; Stage 7: completed URL hashes; Stage 7: completed sponsor-race hashes</title>
+<rect x="196" y="602" width="6.53125" height="18" fill="#f59e0b"/>
+<rect x="202.53125" y="602" width="15.46875" height="18" fill="#10b981"/>
 </g>
-<g><title>0xA140-0xA17F: 0 Unlocated payload, 21 Located, incomplete semantics, 43 Deciphered fields; Eight stage records; Career scalars and 384 event records; Stage 8: outcome counter; Stage 8: five BUN event-reference name hashes; Stage 8: sign-extended BUN table record ID; Career money; Current career-stage index, uint32 LE (legacy editor name is incorrect); Event entry count; Event-name hash</title>
-<rect x="220" y="602" width="7.21875" height="18" fill="#f59e0b"/>
-<rect x="227.21875" y="602" width="14.78125" height="18" fill="#10b981"/>
+<g><title>0xA140-0xA17F: 0 Unlocated payload, 20 Located, incomplete semantics, 44 Deciphered fields; Eight stage records; Career scalars and 384 event records; Stage 8: outcome counter; Stage 8: five BUN event-reference name hashes; Stage 7: completion flag; Stage 8: sign-extended BUN table record ID; Career money; Current career-stage index, uint32 LE; Event entry count; Event-name hash</title>
+<rect x="220" y="602" width="6.875" height="18" fill="#f59e0b"/>
+<rect x="226.875" y="602" width="15.125" height="18" fill="#10b981"/>
 </g>
 <g><title>0xA180-0xA1BF: 0 Unlocated payload, 24 Located, incomplete semantics, 40 Deciphered fields; Career scalars and 384 event records; Event-name hash; Event status byte</title>
 <rect x="244" y="602" width="8.25" height="18" fill="#f59e0b"/>

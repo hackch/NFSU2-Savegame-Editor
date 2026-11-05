@@ -4,7 +4,7 @@ import type { Donor } from './cars.js';
 export type SlotState = 'locked' | 'open' | 'filled';
 import {
   dataView, bytesToHex, checkedSlotBase, slotBase, SLOT_BASE, SLOT_COUNT, CAR_KEY_REL, CAR_TYPE_HASH_REL,
-  SLOT_LOCK_REL, SLOT_BOUGHT_REL, SLOT_RECORD_END_REL, GARAGE_CAR_COUNT, GARAGE_CAR_MAX, PERF_OFF,
+  SLOT_LOCK_REL, SLOT_BOUGHT_REL, SLOT_RECORD_END_REL, PERF_OFF,
   VISUAL_OFF, VISUAL_COUNT,
 } from './layout.js';
 import { PERF_COUNT } from './perf.js';
@@ -111,7 +111,6 @@ export function setSlotCar(data: Uint8Array, slot: number, donor: Donor): Uint8A
   out.fill(0, base + PERF_OFF, base + PERF_OFF + PERF_COUNT);
   out[base + SLOT_LOCK_REL] = 0;
   out[base + SLOT_BOUGHT_REL] = 1;
-  if (slot < SLOT_COUNT) out[GARAGE_CAR_COUNT] = Math.max(out[GARAGE_CAR_COUNT], Math.min(slot + 1, GARAGE_CAR_MAX));
   return out;
 }
 

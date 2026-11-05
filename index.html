@@ -60,6 +60,54 @@
     </section>
 
     <section class="profile-section" ng-if="loaded">
+      <h3>Career access (experimental)</h3>
+      <p class="muted">Shop discovery preserves progression. Stage editing changes road/active-stage gates; full completion intentionally changes event history. Inventory prerequisites are reported, not independently bypassed. Keep a backup.</p>
+      <div class="editor-row">
+        <label>Career stage
+          <select ng-model="career.stage">
+            <option ng-value="0">0 - Intro</option>
+            <option ng-value="1">1</option>
+            <option ng-value="2">2</option>
+            <option ng-value="3">3</option>
+            <option ng-value="4">4</option>
+            <option ng-value="5">5 - Final stage</option>
+            <option ng-value="6">6 - Post-career</option>
+          </select>
+        </label>
+        <button type="button" class="profile-action-btn" ng-click="setCareerStage()">Apply stage</button>
+      </div>
+      <p class="muted">Stage alone does not complete goals, reset completed races or grant rewards. Completed races are not made visible again.</p>
+      <div class="editor-row">
+        <label>Game database <input type="file" accept=".bun,.BUN" aria-label="Choose GLOBALB.BUN for career access" nfsu-file-change="loadGameData"></label>
+        <span class="muted">{{ career.gameName || 'Choose GLOBAL\\GLOBALB.BUN; read locally, never uploaded.' }}</span>
+      </div>
+      <p class="message error" role="status" ng-if="career.error">{{ career.error }}</p>
+      <div ng-if="career.report">
+        <p class="muted">Career stage {{ career.report.stage }}. {{ career.report.events }} / 384 event entries.</p>
+        <p class="muted">Completion: {{ career.report.completion.percent | number:2 }}% ({{ career.report.completion.events }} / {{ career.report.completion.totalEvents }} career events). {{ career.report.completion.stages }} / 6 stages and {{ career.report.completion.photos }} / {{ career.report.completion.totalPhotos }} photo goals complete.</p>
+        <button type="button" class="profile-action-btn" ng-click="discoverShops()" ng-disabled="!hasDiscoverableShops()">Discover eligible shops</button>
+        <button type="button" class="profile-action-btn" ng-click="completeCareer()" ng-disabled="career.report.completion.complete">Complete career (100%)</button>
+        <p class="muted">Full completion marks actual BUN goals complete and sets stage 6; race/photo markers disappear. Does not award money, reward ownership, cars, collectible cash or SMS. In-game effects remain experimental.</p>
+        <details>
+          <summary>Shops and dealers</summary>
+          <ul>
+            <li ng-repeat="shop in career.report.shops track by shop.hash">{{ shop.name }} &mdash; {{ !shop.passed ? shop.reason : (shop.discovered ? 'Discovery gate passed' : 'Eligible for discovery') }}</li>
+          </ul>
+        </details>
+        <details>
+          <summary>Dealer-car progression gates</summary>
+          <p class="muted">Region-dependent prerequisites are shown for both game branches. These are progression gates, not a guarantee of availability in every dealership or installed game build.</p>
+          <ul><li ng-repeat="car in career.report.cars track by $index">{{ car.name }} &mdash; {{ car.passed ? 'Completion gate passed' : car.reason }}</li></ul>
+        </details>
+        <details>
+          <summary>Part progression gates</summary>
+          <p class="muted">BUN item IDs/levels are not installed-part indices. Compatibility, shop selection and special reward rules still apply.</p>
+          <ul><li ng-repeat="part in career.report.parts track by $index">{{ part.name }} &mdash; {{ part.passed ? 'Progression gate passed' : part.reason }}</li></ul>
+        </details>
+      </div>
+    </section>
+
+    <section class="profile-section" ng-if="loaded">
       <h3>Car slots</h3>
       <p class="muted">{{ usedCount() }} of {{ slots.length }} slots filled. Open slots are unlocked and free for a sponsor car.</p>
       <div class="bike-list">
