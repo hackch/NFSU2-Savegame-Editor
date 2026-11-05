@@ -386,6 +386,15 @@ const clamp = (v: number, lo: number, hi: number): number => Math.min(Math.max(v
 const byteT = (b: number): number => clamp((b - 100) * 0.01, -1, 1);
 // Float32 variant for the gear decode (FUN_0059aee0, FUN_005b4780): (b-100)*0.01f.
 const byteT32 = (b: number): number => clamp(Math.fround(Math.fround(b - 100) * Math.fround(0.01)), -1, 1);
+/**
+ * Gear and final-drive byte encoder of FUN_005b3ee0 -> FUN_0059af80, in float32:
+ * trunc(((ratio - def) / (max - min)) * 100f + 100.5f), with the ratio clamped to its range first.
+ */
+const encodeGearByte = (ratio: number, def: number, min: number, max: number): number => {
+  const f = Math.fround;
+  const frac = f(f(f(clamp(ratio, min, max)) - f(def)) / f(f(max) - f(min)));
+  return clamp(Math.floor(f(f(frac * 100) + 100.5)), 0, MAX_TUNE_BYTE);
+};
 
 function clonePhys(p: Phys): Phys {
   return { f: p.f.slice(), gearCount: p.gearCount };
@@ -571,7 +580,8 @@ export class DynoModel {
 
   private static ratioAt(p: Phys, speed: number): number {
     const bias = g(p, 0x1c0);
-    // FUN_0059b5c0 works in float32 with 2*pi/60 = 0.10471967f (0x7A1D38), not the power factor 0.10471204.
+    // FUN_0059b5c0 works in float32 with the constant stored at 0x7A1D38 (44 77 D6 3D = 0.10471966862678528, the
+    // float nearest to 2*pi/60 but not exactly equal to it), not the power factor 0.10471204.
     const f = Math.fround, b = f(bias);
     const r = b < f(0.2) ? f(g(p, 0x50)) : b > f(0.8) ? f(g(p, 0x80))
       : f(f(f(1 - b) * f(g(p, 0x50))) + f(f(g(p, 0x80)) * b));
@@ -813,11 +823,7 @@ export class DynoModel {
         const gearDef = this.defs.get(gear);
         if (gearDef === undefined) continue;
         const [min, max] = this.range(p, gear);
-        const ratio = clamp(g(p, 0x1b0 + gear * 4), min, max);
-        // FUN_005b3ee0 -> FUN_0059af80 encode in float32: trunc(frac*100f + 100.5f).
-        const f = Math.fround;
-        const frac = f(f(f(ratio) - f(gearDef)) / f(f(max) - f(min)));
-        gearBytes[gear] = clamp(Math.floor(f(f(frac * 100) + 100.5)), 0, MAX_TUNE_BYTE);
+        gearBytes[gear] = encodeGearByte(g(p, 0x1b0 + gear * 4), gearDef, min, max);
       }
     }
     applyScalars(16, 22);
@@ -1052,10 +1058,10 @@ export class DynoModel {
   withGearRatio(setup: ArrayLike<number>, param: number, ratio: number): Uint8Array {
     const out = Uint8Array.from(setup);
     const p = this.tuned(setup);
+    // Same float32 encoder as the load path, so a written byte decodes back like the game's own writer.
     const encode = (prm: number, value: number): void => {
-      const def = this.defs.get(prm) as number;
       const [min, max] = this.range(p, prm);
-      out[prm] = clamp(Math.floor(100.5 + 100 * (clamp(value, min, max) - def) / (max - min)), 0, MAX_TUNE_BYTE);
+      out[prm] = encodeGearByte(value, this.defs.get(prm) as number, min, max);
     };
     if (!this.defs.has(param) || !Number.isFinite(ratio)) return out;
     if (param === 9) {
@@ -1178,7 +1184,8 @@ function torqueTable(p: Phys): { tab: number[]; idle: number; inv: number } {
 // Single-precision port of FUN_005b06a0 in the game's operation order. The game keeps every state variable
 // (speed, distance, time, shift counter) in float32 and runs the x87 at 24-bit precision, so each operation
 // rounds to float32. Differences to a double simulation: the shift counter (+-1/60 * 3 / 1.5) reaches
-// 0.99999994 instead of 1.0 after 40 recovery steps, which costs one extra cut/power frame pair per gear
+// 0.9999995827674866 instead of 1.0 after 40 recovery steps (still below 1, so a 41st update is needed), which
+// costs one extra cut/power frame pair per gear
 // change, and the cut branch requires counter > 0 (not >= 0).
 const fr = Math.fround;
 

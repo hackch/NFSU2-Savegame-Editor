@@ -3,8 +3,11 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { DynoModel, findCar, parseGameData } from '../model/dyno.js';
 
-// Reference values come from the game executable run in an emulator (see docs/upstream-issue.md); the fixture
-// holds numbers only. The test needs the game's GLOBALB.BUN, like the other game-data tests.
+// Reference values come from the unmodified game executable (SPEED2.EXE, sha256 f9dd86c0...68a7) run in a CPU
+// emulator that calls only its tuning-load and dyno functions (FUN_005b06a0 and the functions it uses); the method
+// is described in https://github.com/hackch/NFSU2-Savegame-Editor/pull/4. The fixture holds numbers only
+// (car type hash, installed bytes, uniques, setup bytes, unrounded results). The test needs the game's GLOBALB.BUN,
+// like the other game-data tests.
 const GAME_BUN = process.env.NFSU2_GLOBALB ?? 'C:/Program Files (x86)/EA GAMES/Need for Speed Underground 2/GLOBAL/GLOBALB.BUN';
 const SKIP = !existsSync(GAME_BUN) && 'GLOBALB.BUN (set NFSU2_GLOBALB) missing';
 
@@ -39,4 +42,31 @@ test('dyno model reproduces the game executable on 40 reference cases', { skip: 
     // Peak-torque rpm is only listed where it is unambiguous (flat-curve ties are not asserted).
     if (e.peakTorqueRpm !== undefined) assert.equal(r.peakTorqueRpm, e.peakTorqueRpm, `case ${i} peakTorqueRpm`);
   });
+});
+
+test('interactive gear writer encodes bytes with the float32 writer of the load', { skip: SKIP }, () => {
+  // Review note on PR #4: Peugeot 106, all non-visual performance parts, no uniques, neutral setup. The native
+  // float32 writer (FUN_005b3ee0 -> FUN_0059af80) gives byte 82 for this final drive; a double encoder gives 81.
+  const game = parseGameData(new Uint8Array(readFileSync(GAME_BUN)));
+  const car = findCar(game, 0x4b10070a);
+  assert.ok(car, 'Peugeot 106 type hash');
+  const installed = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,0,1,0,0,1,0,0,1,0,0,1,0].map((b) => b !== 0);
+  const model = new DynoModel(game, car, installed, new Array<number>(9).fill(0));
+  const neutral = new Uint8Array(41).fill(100);
+  assert.equal(model.withGearRatio(neutral, 9, 3.2168500423431396)[9], 82);
+  // Writing back an unclamped ratio that a byte decodes to reproduces the same gearing, for every such byte of
+  // every unlocked row. (A ratio clamped to its range limit re-encodes from the range edge, as in the game.)
+  for (const row of model.gearing(neutral)!.rows) {
+    for (let b = 0; b <= 200; b++) {
+      const setup = neutral.slice();
+      setup[row.param] = b;
+      const cur = model.gearing(setup)!.rows.find((r) => r.param === row.param)!;
+      const ratio = cur.ratio;
+      if (ratio - cur.min < 1e-6 || cur.max - ratio < 1e-6) continue;
+      const again = model.withGearRatio(setup, row.param, ratio);
+      assert.deepEqual(model.gearing(again)!.rows.map((r) => r.ratio), model.gearing(setup)!.rows.map((r) => r.ratio),
+        `${row.label} byte ${b}`);
+    }
+  }
 });
