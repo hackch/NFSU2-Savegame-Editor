@@ -15,23 +15,42 @@ This file records what we know about the `SPEED2.EXE` career save (`20CM` magic,
 | Offset | Size | Meaning |
 | --- | --- | --- |
 | `0x00` | 4 | Magic `20CM` |
-| `0x04` | 2 | Total file length, uint16 LE |
-| `0x06` | 2 | Unknown header bytes |
+| `0x04` | 4 | Total file length, uint32 LE in the native writer/loader (the editor currently checks the low uint16) |
 | `0x08` | 4 | Block A length |
 | `0x0C` | 4 | Block B length |
 | `0x10` | 4 | CRC of block A |
 | `0x14` | 4 | CRC of block B |
 | `0x18` | 4 | CRC of the header (bytes `0x00`–`0x17`) |
+| `0x1C` | 4 | Body compatibility tag `0x10D`; required by the examined native load path |
+| `0x20` | 4 | Body size repeated in the compatibility descriptor |
+| `0x24` | `0x480` | 48 stock-car catalogue records, `0x18` bytes each |
+| `0x4A4` | 4 | Active stock catalogue count (31 in the reference save) |
+| `0x4A8` | `0x53C0` | 20 generic saved car configurations, `0x430` bytes each; not the five career garage records |
+| `0x5868` | `0x27BA` | Five native career car records, `0x7F2` bytes each |
+| `0x8022` | 4 | Garage-record count, uint32 LE |
+| `0x8026` | `0x1938` | Six special configurations, `0x434` bytes each; type mask 16, not the runtime sponsor catalogue |
+| `0x995E` | 4 | Special-configuration count, uint32 LE |
+| `0x9962` | `0x808` | Eight stage records, `0x101` bytes each |
 | `0xA16A` | 4 | Money, int32 (max `0x7FFFFFFF`) |
-| `0xA175` | 1 | Garage count, capped at 6 |
+| `0xA175` | 4 | **Current career-stage index**, uint32 LE; the old garage-count label was incorrect |
+| `0xA179` | 4 | Active event-entry count, uint32 LE |
+| `0xA17D` | `0xC00` | Fixed array of 384 eight-byte event records; 137 active in the reference |
+| `0xAE9A` | `0x1409` | 256 twenty-byte SMS records, two count dwords and one control byte |
+| `0xC2A3` | `0x1A4` | Career tail, including transient dwords cleared on load |
+| `0xC447` | `0xDDE` | Profile spans copied in a non-runtime-order sequence; semantics mostly unresolved |
 | `0xD225` | 32 | Driver name, Latin-1, at most 31 characters |
-| `0xD6B5` | 1 | Unknown final byte; `0xD226` is inside the driver-name field, not a separate checksum |
+| `0xD245` | `0x33` | Auxiliary object: eight reserved zero bytes, three bytes, two twenty-byte spans |
+| `0xD278` | `0x43E` | Six identity-matched runtime-state records, `0xB5` bytes each |
+
+This overview omits individual unresolved scalar fields; [the complete serializer ledger](technical.md#whole-file-first-pass-2026-11-05) accounts for every byte. The final byte belongs to the sixth tail record's dword payload; neither it nor the name's `0xD226` byte is a separate checksum.
 
 ## Checksums
 
 - CRC-32, MSB-first, polynomial `0x04C11DB7`, with input and output inverted.
 - The implementation is `nfsu2Crc` in [src/model/checksum.ts](src/model/checksum.ts).
 - Each save write must recalculate all three CRCs. The editor does this on download.
+
+The first 4 KiB and the subsequent whole-file pass are traced in [technical.md](technical.md#first-4-kib-trace-2026-11-05). The native header's bytes `0x06`–`0x07` are the upper half of its uint32 file length, not a separate unknown field. Block A is a compatibility descriptor; its tag is checked for equality with `0x10D`, but no decimal "version 269" meaning is established. Structural coverage is now complete; 35.14% of bytes remain semantically incomplete.
 
 ## Car slots
 
@@ -51,6 +70,8 @@ This file records what we know about the `SPEED2.EXE` career save (`20CM` magic,
 | `+0x428` | 1 | Slot lock flag |
 | `+0x429` | 1 | Car bought flag |
 | `+0x586` | 9 | Indexed performance ownership bitset; ninth byte's visual-purchase semantics remain unverified |
+| `+0x6BE` | 4 | Ordinary purchase-price accumulator, serialized from purchased-subobject runtime `+0x3BC` |
+| `+0x6CA` | 272 | 68 companion dwords; precise per-item meaning unresolved |
 | Sparse ranges within `+0x462`–`+0x7E1` | 420 | Broad category-unlock edits; overlaps the first eight ownership bytes, not a contiguous 420-byte table |
 
 - Donor blocks are read from absolute offsets `0x5870`, `0x5950`, and `0x5B20`.
@@ -81,8 +102,8 @@ This file records what we know about the `SPEED2.EXE` career save (`20CM` magic,
 ## Locking
 
 - A slot is locked when its own lock flag is non-zero: `isSlotLocked` reads the byte at `slot base + 0x428`. `1` is locked, `0` is unlocked.
-- Confirmed in game: with the flag cleared on records 1–4 of `treav1r`, all 5 slots show unlocked and cars work. Setting only the garage count (`0xA175`) did not change the lock.
-- The garage count is written by `setSlotCar` but is not read by the lock check. Its effect in game is unverified.
+- Confirmed in game: with the flag cleared on records 1–4 of `treav1r`, all 5 slots show unlocked and cars work. The previous experiment changing `0xA175` did not change the lock; it was changing the low byte of the **career stage**, not a garage count.
+- **Existing editor hazard:** `setSlotCar` still raises the byte at `0xA175` under the legacy `GARAGE_CAR_COUNT` name. Native `FUN_00514530` / `FUN_00529230` serialize this as a four-byte current-stage field; the real garage-record count is `0x8022`. That legacy write can change career progression. It is not part of the lock check and has not been changed by this research-only pass.
 - The byte at `+0x429` is `hasCarBought` (strong evidence, not yet confirmed by an editor write in game). `isCarBought` reads it. `1` means a car is bought. Owned cars in `treav0r` and `Jane` all have `01` there.
 - Slot state shown in the UI (`slotState`): locked takes priority. Otherwise a bought car is `filled`, and an unlocked slot with no bought car is `open` (free for a sponsor car).
 - `setSlotCar` clears the lock flag and sets the bought flag on the slot it writes.
@@ -91,7 +112,7 @@ This file records what we know about the `SPEED2.EXE` career save (`20CM` magic,
 
 | Operation | What it writes |
 | --- | --- |
-| Replace car | Clears visual hashes, writes donor blocks 1–3, clears vinyls/colours, decal textures and neon/frame. Performance flags are zeroed; dyno setups are retained. No appearance is copied from a neighboring slot. Clears the lock flag and sets the bought flag. Raises the career garage count to at most 6 |
+| Replace car | Clears visual hashes, writes donor blocks 1–3, clears vinyls/colours, decal textures and neon/frame. Performance flags are zeroed; dyno setups are retained. No appearance is copied from a neighboring slot. Clears the lock flag and sets the bought flag. **Legacy code also raises the low byte of the current-stage field at `0xA175` to at most 6; this is not a garage count** |
 | Swap slots | Exchanges bytes from the shifted slot base to the native record end, preserving each record's first eight bytes and handle (**experimental**, untested in game) |
 | Set money / name | Only the target field. Input values are never mutated |
 

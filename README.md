@@ -12,25 +12,41 @@ The reference career save is **54,966 bytes (`0xD6B6`, 53.68 KiB)**. Read the gr
 
 | Evidence state | Bytes | File coverage |
 | --- | ---: | ---: |
-| Deciphered: field meaning and encoding known | 5,239 | **9.53%** |
-| Located inside a known structure, semantics incomplete | 6,104 | **11.11%** |
-| Payload not assigned to a specific structure/field | 43,623 | **79.36%** |
-| **Located in total (includes deciphered)** | **11,343** | **20.64%** |
+| Deciphered: field meaning and encoding known | 35,649 | **64.86%** |
+| Located inside a known structure, semantics incomplete | 19,317 | **35.14%** |
+| Payload not assigned to a specific structure/field | 0 | **0.00%** |
+| **Located in total (includes deciphered)** | **54,966** | **100.00%** |
 
 This is a conservative, byte-weighted inventory of current repository evidence, **not a percentage of game features implemented or exhaustively verified in-game**. The header's two block boundaries locate the outer container only; they do not make all its payload "discovered."
 
 | Located structure | Absolute range (end exclusive) | Size | Deciphered bytes |
 | --- | --- | ---: | ---: |
-| Header | `0x0000`–`0x001C` | 28 | 26 |
-| Block A payload | `0x001C`–`0x0024` | 8 | 0 |
-| Five native car records | `0x5868`–`0x8022` | 10,170 | 5,035 |
-| Money and garage count | `0xA16A`–`0xA16E`; `0xA175` | 5 | 5 |
-| Event count and 137 observed entries | `0xA179`–`0xA5C5` | 1,100 | 141 |
+| Header | `0x0000`–`0x001C` | 28 | 28 |
+| Block A compatibility descriptor | `0x001C`–`0x0024` | 8 | 8 |
+| Stock catalogue and active count | `0x0024`–`0x04A8` | 1,156 | 772 |
+| 20 generic configurations | `0x04A8`–`0x5868` | 21,440 | 20,180 |
+| Five native career car records | `0x5868`–`0x8022` | 10,170 | 5,115 |
+| Garage-record count | `0x8022`–`0x8026` | 4 | 4 |
+| Six special configurations | `0x8026`–`0x995E` | 6,456 | 6,054 |
+| Special-configuration count | `0x995E`–`0x9962` | 4 | 4 |
+| Eight stage records | `0x9962`–`0xA16A` | 2,056 | 224 |
+| Career scalars and 384 event records | `0xA16A`–`0xAE9A` | 3,376 | 1,932 |
+| 256 SMS inbox records and controls | `0xAE9A`–`0xC2A3` | 5,129 | 1,288 |
+| Career tail | `0xC2A3`–`0xC447` | 420 | 0 |
+| Profile copy spans | `0xC447`–`0xD225` | 3,550 | 0 |
 | Driver-name field | `0xD225`–`0xD245` | 32 | 32 |
+| Auxiliary tail object | `0xD245`–`0xD278` | 51 | 8 |
+| Six identity-matched runtime-state records | `0xD278`–`0xD6B6` | 1,086 | 0 |
 
-Each car contributes **1,007 deciphered bytes**: its native slot handle (4), identity hash (4), 170 visual hashes (680), nine unique-performance flags (36), 68 installed-item positions (68), five dyno setups (205), lock/bought flags (2), and the first eight ownership bytes (8). Visual hashes include derived/unused slots; deciphering their stored representation does not mean every slot is independently editable.
+Each career garage record contributes **1,023 deciphered bytes**: its native slot handle (4), enumeration/type/initialization dwords (12), identity hash (4), 170 visual hashes (680), nine unique-performance flags (36), 68 installed-item positions (68), five dyno setups (205), lock/bought flags (2), first eight ownership bytes (8), and ordinary purchase-price accumulator (4). Visual hashes include derived/unused slots; deciphering their stored representation does not mean every slot is independently editable.
 
-The 420 category-unlock offsets are **sparse**, not a contiguous table. Eight overlap the mapped performance ownership bytes; the remaining 412 per car stay amber because individual-part semantics are not established. The ninth ownership byte also stays amber because its visual-purchase interpretation is unverified. Donor-copy blocks, record gaps and zero-filled bytes are not automatically counted as deciphered. In the event array, only its count and each entry's traced status byte (`+6`) are counted as deciphered; the rest remains amber. The observed entry count does not establish the table's full capacity.
+**First 4 KiB traced (2026-11-05):** `0x0000`–`0x0FFF` remains **100% structurally located**, with **3,534 bytes deciphered (86.28%)** and **562 bytes still semantically incomplete (13.72%)**. It contains the container, a compatibility descriptor, 48 stock catalogue records and the beginning of 20 generic saved car configurations—not the career garage slots. See [the field-by-field trace](technical.md#first-4-kib-trace-2026-11-05).
+
+**Whole-file first pass:** internal native serializers now account for every byte through EOF, including all repeating configurations, stages, events, SMS messages and tail blocks. Original x86 collection/profile/tail instructions passed fixture or constrained synthetic routing checks; the career loader intentionally resets four transient dwords, and the SMS loader compacts unresolved definitions and recomputes counts. See [the boundary ledger, normalization rules and validation limits](technical.md#whole-file-first-pass-2026-11-05). Structural coverage is not complete semantic understanding.
+
+**Important correction:** `0xA175` is the **uint32 current career-stage index**, not a garage count. The actual garage-record count is at `0x8022`. The editor's existing replacement path still writes the low byte of `0xA175` under its old name; this research pass documents the hazard but does not change editing behavior.
+
+The 420 category-unlock offsets are **sparse**, not a contiguous table. Eight overlap the mapped performance ownership bytes; the remaining 412 per car stay amber because individual-part semantics are not established. The ninth ownership byte also stays amber because its visual-purchase interpretation is unverified. Donor-copy blocks, record gaps and zero-filled bytes are not automatically counted as deciphered. The fixed event array has **384 entries**, of which 137 are active in the reference: each name hash (`+0`) and traced status byte (`+6`) is green, while three bytes per entry remain amber. Status values are not universal completion/unlock flags.
 
 Scope: the repository's `testfile/treav0r` career file, including empty car records; separate ZIP/GARAGE.DAT bytes are excluded. Evidence comes from [layout constants](src/model/layout.ts), [save validation](src/model/save-file.ts), [performance mappings](src/model/perf.ts), [dyno layouts](src/model/dyno.ts), [unlock ranges](src/data/unlock-table.ts), and the serializer/event traces in [technical.md](technical.md). Byte coverage counts overlapping interpretations only once.
 
@@ -41,7 +57,7 @@ npm run build
 node scripts/save-coverage.mjs
 ```
 
-The generator checks the reference file's structure and checksums, rejects invalid/duplicate evidence ranges, and verifies that the grid accounts for every byte exactly once.
+The generator checks the reference file's structure and checksums, compatibility descriptor, stock count/index sequence, event capacity and first-4-KiB totals. It requires contiguous internal block boundaries through EOF, rejects invalid/duplicate evidence ranges, emits per-block totals, and verifies that the grid accounts for every byte exactly once.
 
 ## Features
 

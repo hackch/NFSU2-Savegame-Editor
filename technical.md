@@ -1,4 +1,226 @@
-# Technical notes: performance tuning
+# Technical notes: save layout and tuning
+
+## First 4 KiB trace (2026-11-05)
+
+Scope: file offsets **`[0x0000, 0x1000)`**, not executable addresses. This pass used REA/Ghidra 12.1.4 on the same `SPEED2.EXE` SHA-256 recorded below, the local `GLOBALB.BUN`, and the unchanged repository reference save. It establishes field routing and selected semantics, not safe editing of every field or exhaustive in-game behavior.
+
+### Container and compatibility descriptor
+
+| File range, end exclusive | Encoding and meaning | Native evidence |
+|---|---|---|
+| `0x0000`–`0x0004` | Magic `20CM` | `FUN_006FC226` writes `0x4D433032` |
+| `0x0004`–`0x0008` | Total file length, **uint32 LE** | `FUN_006FCE82` passes `lenA + 0x1C + lenB` to `FUN_006FC226`; the native loader compares the full field |
+| `0x0008`–`0x0010` | Two uint32 LE block lengths: 8 and `0xD692` | Container writer and loader |
+| `0x0010`–`0x001C` | Block A, block B, header CRCs | `FUN_006FCE82`; header CRC covers `[0, 0x18)` |
+| `0x001C`–`0x0020` | Compatibility tag `0x10D`, uint32 LE | `FUN_004D9B80` writes it; `FUN_004A9850` requires this exact value before dispatching the body loader |
+| `0x0020`–`0x0024` | Repeated body size `0xD692`, uint32 LE | Same writer and compatibility check; must equal the allocated/read body size |
+
+The editor currently validates the low uint16 of the file length; this trace does not change its behavior. Bytes `0x06`–`0x07` are not independent unknown bytes. The compatibility tag is not the save size, CRC, player level, or a proven human-readable version number.
+
+### Stock catalogue: `0x0024`–`0x04A4`
+
+`FUN_0052A450` adds `0x10` to ECX, then jumps to `FUN_0052A280`. The latter passes profile `+0x3B0` to `FUN_005166B0`; for the observed profile base `0x83A9E0`, this collection is at `0x83AD90`.
+
+The collection begins with **48 runtime records of `0x1C` bytes**. The serializer omits each first dword (its vtable pointer) and saves the following six dwords, giving **48 x `0x18` = `0x480` bytes**. Record `i` is at `0x24 + i * 0x18`; all offsets below are relative to that serialized record, not a garage slot.
+
+| Serialized offset | Runtime offset | Meaning | Coverage decision |
+|---|---|---|---|
+| `+0x00` | `+0x04` | Common-header value; zero in the reference catalogue | Amber: initialization alone does not identify its meaning |
+| `+0x04` | `+0x08` | Lookup handle, hash of `STOCK_<internal car name>` | Green: written by `FUN_00516500` through format/hash helper `FUN_0050B990`; matched all 31 populated entries against local BUN names |
+| `+0x08` | `+0x0C` | Common-header scalar; populated values look like float32 scores | Amber: do not infer its units, exact score meaning, or cache policy from plausible float values |
+| `+0x0C` | `+0x10` | Enumeration-enabled dword: nonzero permits enumeration | Green: `FUN_005162D0` tests it; this is not proof of career purchase/unlock status |
+| `+0x10` | `+0x14` | Record-type bit mask; stock = 1, generic configuration = 2, career = 4, sponsor = 8, special = 16 | Green: constructors/reset paths and masked enumeration in `FUN_005162D0` |
+| `+0x14` | `+0x18` | BUN car-record index, int32; unassigned = -1 | Green: `FUN_00516500` writes the index while walking `0x890`-byte BUN records; stock virtual accessor at `0x503A30` reads it |
+
+`0x04A4`–`0x04A8` stores the active catalogue count (uint32 LE), copied from collection `+0x540`. **31** entries are active in the reference; their indices are exactly 0–30. The remaining 17 records have zero handles and index -1, but retain the type-mask value 1. They are real serialized records, not padding.
+
+Stock handles are not raw car identity hashes: for example, `STOCK_350Z` and `350Z` hash differently. `FUN_00503550` searches stock handles at runtime `+8`, whereas the stock vtable's `+4` method returns the car-record index. The existing donor list alone cannot decode this catalogue's handles.
+
+`FUN_00516500` builds the catalogue from BUN car records with a geometry path and record flag bit `+0xDA & 2`. It normally accepts class 0; class 2 also needs runtime gate `DAT_00838470`. The reference's 31 records do not prove every build or runtime always has 31.
+
+### Generic saved configurations beginning at `0x04A8`
+
+The next collection is **20 x `0x430` serialized bytes**, ending at `0x5868`, where the five career garage records begin. Runtime configuration records have stride `0x434`; again their vtable dword is not saved. `FUN_005035C0` searches this collection before the garage collection. Calling these the career slots would therefore be incorrect.
+
+Record `i` is at **`C(i) = 0x04A8 + i * 0x430`**. Its first five serialized dwords have the same common header as above, except the final stock index is replaced by configuration payload:
+
+| Relative to `C(i)` | Size | Meaning and evidence |
+|---|---:|---|
+| `+0x000` | 4 | Unresolved common-header value |
+| `+0x004` | 4 | Lookup handle at runtime record `+8`; `FUN_005035C0` ignores zero handles |
+| `+0x008` | 4 | Unresolved common-header scalar; `FUN_00516B90` stores a float from `FUN_005B6990`, but its full score/cache semantics remain open |
+| `+0x00C` | 4 | Enumeration-enabled dword |
+| `+0x010` | 4 | Type mask; generic = 2 |
+| `+0x014` | 4 | Configuration initialized marker: reset to 0 by `FUN_00516A60`, set to 1 by `FUN_00503950` |
+| `+0x018` | 4 | Unresolved configuration field |
+| `+0x01C` | 4 | Car identity hash, uint32 LE; `FUN_00503950` hashes the BUN car name |
+| `+0x020` | 680 | 170 visual hashes, uint32 LE; `FUN_00503880` resolves them, `FUN_00503950` writes them |
+| `+0x2C8` | 40 | Unresolved dwords preceding the mapped nine unique fields |
+| `+0x2F0` | 36 | Nine unique-performance dwords; the same configuration subobject copied to/from the garage records |
+| `+0x314` | 4 | Unresolved following dword, not an established tenth unique |
+| `+0x318` | 68 | Installed-item byte positions |
+| `+0x35C` | 205 | Five 41-byte dyno setups, ending at `+0x429` exclusive |
+| `+0x429` | 7 | Three trailing payload bytes and a final dword; meanings unresolved |
+
+`FUN_005166B0` writes runtime record `+4..+0x17`, copies `0x418` bytes from `+0x18`, then writes runtime `+0x430`. The payload begins at runtime record `+0x18`, but serialized `+0x14`. `FUN_00516B90` explicitly passes runtime record `+0x18` to `FUN_00503950`; its assembly resets setups starting at record `+0x360`. `FUN_00516AC0` reconstructs a car and copies a selected 41-byte setup. These establish the offsets without assuming a contiguous runtime dump.
+
+Within this pass, configuration 0 occupies `0x04A8`–`0x08D8`, configuration 1 `0x08D8`–`0x0D08`, and configuration 2 starts at `0x0D08`. The requested boundary cuts configuration 2 at relative `+0x2F8`: it includes only its first **two** unique dwords, not its installed flags or dyno setups.
+
+The reference's first configuration has identity `0x000AC6D1` (350Z), while the next two have zero identities. Zero-filled fields in those records still have established encodings; untraced gaps remain amber regardless of their contents. No claim is made here that a generic record is a particular player's currently selected quick-race car without tracing its consumers.
+
+### Validation and remaining work
+
+- Executed the **original x86 instructions** in Unicorn: loader `0x516850` up to (excluding) `0x516920`, then writer `0x5166B0` up to (excluding) `0x516797`. These prefixes cover all 48 stock records, their count, and all 20 generic configurations.
+- The real fixture plus eight seeded random payloads each round-tripped **22,596 bytes (`0x5844`) exactly**. Checked every record's file-to-runtime mapping, preserved all 68 omitted vtable dwords, verified the returned buffer position, and checked the output-end sentinel. No game helpers were hooked or stubbed; execution stopped before the career-record phase. This validates routing, not gameplay meaning.
+- Independently matched all 31 populated stock handles to `hash("STOCK_" + BUN car name)` and confirmed the 0–30 indices. The first populated configuration's identity resolves to the local BUN 350Z record.
+- The source save was not modified; structure and all three CRCs remain valid.
+- **First 4 KiB coverage:** 3,534 deciphered bytes (**86.28%**), 562 located-but-incomplete bytes (**13.72%**), no unlocated bytes. The initial pass credited only bytes below `0x1000`; the subsequent whole-file pass below extends the repeating evidence.
+- Remaining in this slice: the common-header value/scalar, configuration `+0x18`, the ten dwords before the unique fields, and the trailing gaps. `0x1000` is still inside configuration 2; it is not the start of a new record.
+
+## Whole-file first pass (2026-11-05)
+
+REA/Ghidra traces of the original body writer `FUN_0052A280` and inverse `FUN_005344D0`, with native-instruction checks described below, locate **all 54,966 bytes**. This is a structural first pass, not a claim that copied opaque fields are understood or safe to edit. Coverage is **35,649 deciphered bytes (64.86%)**, **19,317 located but incomplete bytes (35.14%)**, and no unlocated bytes. The first-4-KiB totals above are unchanged.
+
+### Complete boundary ledger
+
+Ranges are absolute file offsets with exclusive ends. Runtime offsets are relative to the collection, career object or profile identified in the first trace.
+
+| File range | Size | Native routing |
+|---|---:|---|
+| `0x0000`–`0x001C` | `0x1C` | Container header |
+| `0x001C`–`0x0024` | 8 | Compatibility descriptor |
+| `0x0024`–`0x04A4` | `0x480` | 48 stock records, runtime stride `0x1C`, saved stride `0x18` |
+| `0x04A4`–`0x04A8` | 4 | Collection `+0x540`: active stock count |
+| `0x04A8`–`0x5868` | `0x53C0` | 20 generic configurations, runtime stride `0x434`, saved stride `0x430` |
+| `0x5868`–`0x8022` | `0x27BA` | Five career cars, runtime collection `+0x5954`, stride `0x7F8`; saved stride `0x7F2` |
+| `0x8022`–`0x8026` | 4 | Collection `+0x812C`: garage-record count |
+| `0x8026`–`0x995E` | `0x1938` | Six special configurations, runtime collection `+0x8130`, stride `0x438`; saved stride `0x434` |
+| `0x995E`–`0x9962` | 4 | Collection `+0x9A80`: special-configuration count |
+| `0x9962`–`0xA16A` | `0x808` | Eight stage records, runtime career `+0x72D8`, stride `0x104`; saved stride `0x101` |
+| `0xA16A`–`0xAE9A` | `0xD30` | Career scalars and the full event array |
+| `0xAE9A`–`0xC2A3` | `0x1409` | 256 SMS records x `0x14`, then nine control bytes |
+| `0xC2A3`–`0xC447` | `0x1A4` | Career tail |
+| `0xC447`–`0xC51F` | `0xD8` | Profile `+0x2D8` |
+| `0xC51F`–`0xC55B` | `0x3C` | Profile `+0x48` |
+| `0xC55B`–`0xC56B` | `0x10` | Profile `+0x38` |
+| `0xC56B`–`0xC5BB` | `0x50` | Profile `+0x84` |
+| `0xC5BB`–`0xC5CB` | `0x10` | Profile `+0x28` |
+| `0xC5CB`–`0xC747` | `0x17C` | Profile `+0xD4` |
+| `0xC747`–`0xC74F` | 8 | Profile dwords `+0x250`, `+0x254` |
+| `0xC74F`–`0xC755` | 6 | Profile bytes `+0xA0F9`, `+0xA0F8`, then dword `+0xA0F4` |
+| `0xC755`–`0xD1A5` | `0xA50` | Profile `+0xA0FC` |
+| `0xD1A5`–`0xD225` | `0x80` | Profile `+0x258` |
+| `0xD225`–`0xD245` | `0x20` | Profile `+0`: driver name |
+| `0xD245`–`0xD278` | `0x33` | `FUN_00515BF0`, auxiliary runtime object `0x850080` |
+| `0xD278`–`0xD6B6` | `0x43E` | `FUN_005B9420`, six fixed `0xB5` records |
+
+### Repeating cars and the purchased subobject
+
+The generic payload table above applies to all 20 generic records and to the first `0x430` bytes of each special record. The special record adds a dword at serialized `+0x430` (runtime `+0x434`), whose full meaning remains amber. `FUN_0052A7F0` initializes those six records from preset triples, calls `FUN_00516B90`, and sets their common type mask to **16**. They are not the separate **12-record runtime sponsor catalogue**, constructed by `FUN_005163C0` with type mask 8. All collection vtable dwords are omitted from the save.
+
+The career configuration uses the same mapped fields, eight bytes before the editor-relative `S(i)` base. Its common enumeration/type/initialization fields are therefore at `S(i)+4`, `+8`, `+0xC`. `FUN_00516620` also writes runtime `+0x7F4` and `+0x7F5` as the separate lock/bought bytes, then serializes the purchased subobject via `FUN_00503F00`. These are not the common enumeration flag.
+
+The purchased subobject starts at serialized native car record `+0x432`, or editor base **`S(i)+0x42A`**. It is `0x3C0` bytes, but is **not** a contiguous runtime dump:
+
+| Serialized subobject range | Runtime subobject range |
+|---|---|
+| `+0x000`–`+0x294` | `+0x000`–`+0x294` |
+| `+0x294`–`+0x298` | `+0x3BC`–`+0x3C0` |
+| `+0x298`–`+0x2A0` | `+0x294`–`+0x29C` |
+| `+0x2A0`–`+0x3B0` | `+0x2AC`–`+0x3BC` |
+| `+0x3B0`–`+0x3C0` | `+0x29C`–`+0x2AC` |
+
+`FUN_00504040` reverses this permutation. The dword at **`S(i)+0x6BE`** is the ordinary purchase-price accumulator: `FUN_00521B00` adds the purchased item's price to career runtime record `+0x7F0`, i.e. purchased subobject `+0x3BC`. The **68 companion dwords** at `S(i)+0x6CA` are structurally mapped, but their exact per-item semantics remain unresolved. The existing sparse unlock edits do not overlap the accumulator.
+
+### Stage records and career scalars
+
+Each saved stage at `0x9962+i*0x101` routes through `FUN_00500FA0` / `FUN_00514400`:
+
+- `[+0,+0xE8)` copies the runtime prefix; most meanings remain unresolved.
+- `+0xDC` is a uint32 stage outcome counter: `FUN_00541320` increments it for a nonzero outcome in career mode. This alone does **not** establish that it counts only Outrun wins.
+- `+0xE8..+0xFC` contains five uint32 name hashes, replacing runtime pointers to BUN `0x34A19` records (stride `0x10`). `FUN_00512990` resolves them via names in the BUN string blob `0x34A1D`; do not confuse them with unique-event records in `0x34A1B`.
+- `+0xFC` is a copied byte with unresolved gameplay meaning.
+- `+0xFD` is an int32 **sign-extension of the first byte** of the runtime `+0x100` pointed BUN stage-table record. The inverse searches `0x50`-byte records by that ID; `FUN_00512A70` installs the `0x34A18` table. It is not a serialized pointer.
+
+Let `A=0xA16A`. The following ordered spans account for all `0xD30` bytes before the inbox; unknown fields stay amber even when they resemble flags or world coordinates.
+
+| File offset relative to A | Size | Career runtime source / meaning |
+|---|---:|---|
+| `+0x000` | 4 | `+0x7134`: money |
+| `+0x004` | 1 | `+0x8868` |
+| `+0x005` | 4 | `+0x872C`: unresolved counter |
+| `+0x009`, `+0x00A` | 1 each | `+0x873E`, `+0x873F` |
+| `+0x00B` | 4 | `+0x7AF8`: **current career-stage index** |
+| `+0x00F` | 4 | `+0x7AFC`: active event-entry count |
+| `+0x013` | `0xC00` | `+0x7B00`: 384 fixed eight-byte event records |
+| `+0xC13`, `+0xC14` | 1 each | `+0x873C`, `+0x873D` |
+| `+0xC15` | 4 | `+0x8740` |
+| `+0xC19` | 1 | `+0x8744` |
+| `+0xC1A` | 16 | `+0x8750`: four unresolved dwords |
+| `+0xC2A` | 2 | `+0x8760` |
+| `+0xC2C` | 4 | `+0x8764` |
+| `+0xC30` | `0x100` | `+0x8768`: unresolved byte table |
+
+**Correction and editor hazard:** absolute **`0xA175` is a four-byte stage index**, reference value 4, not a one-byte garage count. The actual garage-record count is at **`0x8022`**. The production `GARAGE_CAR_COUNT` name and the low-byte write in `setSlotCar` are legacy misinterpretations that can change progression. This read-only research pass corrects documentation/coverage, not that editing behavior.
+
+The event array is **`[0xA17D,0xAD7D)`**, not just the 137 observed entries. `FUN_00512F10` finds/creates entries by the name hash at `+0` and updates the count. Each status byte at `+6` is traced; the other three bytes stay amber. `FUN_005419C0` writes status 1 after unique selection, while `FUN_00533BE0` writes 2 during setup: these are not established universal "completed"/"unlocked" flags.
+
+### SMS inbox and career-tail normalization
+
+`FUN_005014F0` saves 256 records from career runtime `+0x5D20`, each `0x14` bytes:
+
+| Saved entry offset | Encoding / evidence |
+|---|---|
+| `+0` | uint32 BUN definition-name hash, replacing a pointer; inverse `FUN_00501310` searches `0x34A17` definitions via their uint16 string offsets |
+| `+4` | Read flag: `FUN_00514DC0` sets it to 1 and reduces the unread count |
+| `+5`, `+6`, `+7` | Copied status bytes; full gameplay meanings remain amber |
+| `+8`, `+0xC`, `+0x10` | Three copied dwords; meanings unresolved |
+
+Following the records: `0xC29A` is the entry count, `0xC29E` the unread/actionable count, and `0xC2A2` a copied control byte. Runtime inbox `+0x1408` is **not** serialized. The writer's second argument is a **remaining-length pointer**, unlike the enclosing career writer's length value.
+
+`FUN_00514E80` is a normalizing loader: it resolves all 256 hashes, discards unresolved/null definitions, compacts surviving entries, recomputes the entry count, and counts unread entries with **`entry[4]==0 && entry[6]!=1`**. `FUN_005014C0` sets both bytes 4 and 6 to 1; byte 6's complete action semantics are not claimed. Unused destination slots depend on the initialized runtime object, so arbitrary saved bytes are not guaranteed to round-trip.
+
+The career tail routes its first 16 bytes from runtime `+0x8869`, the next 400 bytes from `+0x887C`, then saves runtime `+0x8738` as its pointed record's `+8` identifier (or zero), not the pointer itself. `FUN_00529230` resolves that ID through `FUN_004FFC90` and explicitly clears four runtime dwords:
+
+| Career runtime dword cleared | Corresponding file dword |
+|---|---|
+| `+0x8898` | `0xC2CF` |
+| `+0x8984` | `0xC3BB` |
+| `+0x898C` | `0xC3C3` |
+| `+0x8994` | `0xC3CB` |
+
+The exact gameplay meanings of the career tail remain amber. The fixture changes **13 individual bytes across those four dwords** under native load/write; it is incorrect to describe this whole block as a lossless raw dump.
+
+### Profile and final objects
+
+Profile spans in the boundary ledger are directly copied by the body writer/inverse, but their option/statistic meanings remain mostly untraced. **Only the driver-name field is green**; the large zero-filled regions are not assumed padding.
+
+The `0x33`-byte auxiliary object uses `FUN_00515BF0` / `FUN_00515C90`. Its first **eight bytes are deliberately written as two zero dwords**, and ignored on load; these are the only newly credited reserved bytes. Saved `+8,+9,+0xA` route from runtime `+0x49,+0x4A,+0x4B`; saved `[+0xB,+0x1F)` from runtime `+0x58`; saved `[+0x1F,+0x33)` from runtime `+0x80`. Option names remain amber.
+
+`FUN_005B9420` always emits six final `0xB5` records, based on runtime records at `0x874C40+i*0x370`:
+
+| Saved record range | Runtime routing |
+|---|---|
+| `+0x00`–`+0x10` | Four-dword identity-matching key via `FUN_005B8110`, or zeros if runtime `+0x230==-1` |
+| `+0x10`–`+0x34` | Nine dwords at runtime `+0x344`–`+0x368` |
+| `+0x34` | Byte at runtime `+0x368` |
+| `+0x35`–`+0xB5` | 32 dwords at runtime `+0x18` |
+
+Slots outside active count `DAT_00870764` are zeroed in the output. The inverse `FUN_005B9570` applies a saved record **only to a runtime record with a matching four-dword key**; unmatched saved records are ignored. For identity mode runtime `+0x234==0x13`, the key comes directly from runtime `+0x21C..+0x22C`; other modes obtain it through a virtual call on `DAT_0086FFB4[index]`. This is not evidence that the records are padding, race results, or freely editable configuration. Their gameplay meaning stays amber through EOF.
+
+### Native validation and limits
+
+Executed original PE x86 instructions in Unicorn, with no edits to the EXE, BUN or source save:
+
+- **Collection `0x516850` / `0x5166B0`:** all **39,230 bytes (`0x993E`)** from `0x24` to `0x9962` round-tripped exactly for the fixture plus eight seeded random payloads. Preserved all **79 omitted vtable dwords**. Included career purchased-subobject reorder helpers and both count fields; no game helpers were hooked.
+- **Career `0x529230` / `0x514530`:** the fixture's **10,981 bytes (`0x2AE5`)** matched exactly after the four documented dwords were zeroed; a second native load/write was idempotent. All 109 SMS entries survived with unread count 0. Eight seeded random career cases also matched after those resets, with stage-reference fields constrained to fixture/BUN-valid values, the terminal career-reference ID held at zero, all 384 event records randomized, all 256 SMS hashes valid and count/unread controls canonical. Checked returned endpoints and the fixture output-end sentinel.
+- **SMS normalization:** separate tests with alternating valid and null/nonzero-unknown hashes compacted **256 to 128** records exactly, retained surviving fields, recomputed unread counts and preserved the control byte. The writer consumed its remaining-length pointer to zero. Real BUN tables were mapped into emulated memory, and the original hash/resolver code executed. **Only host allocation/free services** at `0x575620` / `0x575630` were substituted; no lookup, serializer or normalizer was mocked.
+- **Profile:** inverse copy fragment `[0x534514,0x534654)` and writer fragment `[0x52A2B6,0x52A41E)` round-tripped **3,582 bytes (`0xDFE`)** for the fixture plus eight random payloads. Independently checked all **14** contiguous/noncontiguous runtime spans, including the name. These fragments intentionally exclude unrelated profile initialization and post-load gameplay fixups; no hooks.
+- **Auxiliary tail:** nine cases (fixture plus eight canonical random payloads) reproduced all **51 bytes**, including the mandated leading zero dwords; no hooks.
+- **Final six records:** nine seeded cases reproduced all **1,086 bytes** using matching direct keys in native identity mode `0x13`; independently checked the 37-byte state and 128-byte payload mappings. Active count 0 produced all zeros. No hooks; other virtual-identity modes and in-game meaning were not tested.
+- Final SHA-256 checks confirmed the reference save, EXE and BUN were unchanged. All source-save CRCs still pass. No game was launched and no real save was written.
+
+Next semantic targets are the car common-header/configuration gaps and purchased companion fields, the first `0xE8` bytes of each stage, unresolved career scalars, SMS status/payload fields, profile options/statistics, and the final identity-matched objects. Locating their native source is not sufficient to promote them to green.
 
 ## Three separate kinds of state
 
