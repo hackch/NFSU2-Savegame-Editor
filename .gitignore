@@ -40,9 +40,6 @@
 # debug information files
 *.dwo
 
-# test files
-testfile/
-
 # node / build output
 node_modules/
 dist/
