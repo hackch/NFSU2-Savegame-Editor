@@ -972,6 +972,10 @@ test('gearing load matches native byte normalization and adjacent-gear propagati
 });
 
 test('game data: dyno matches the traced reference model on the fixture', { skip: SKIP_NO_GAME }, () => {
+  // These values predate the native corrections of PR #4: they come from the earlier traced reference model
+  // (technical.md, "Dyno tuning"), not from the game. The evidence for the model is now src/test/dyno-exactness.test.ts (the game executable's own results).
+  // Regenerate this table from the corrected model with `node scripts/fixture-dyno.mjs`; the case inputs it also
+  // prints are numbers only and can be run through the game executable for independent values.
   const game = parseGameData(new Uint8Array(readFileSync(GAME_BUN)));
   const data = load();
   const golden = [
@@ -1271,7 +1275,13 @@ test('game data: ECU and turbo curves match the game byte mapping', { skip: SKIP
       assert.ok(Math.abs(ecu[i].effective - total + boost) < 1e-9, `unique ${unique}: actual loaded ECU`);
       assert.equal(turbo[i].effective, boost, `unique ${unique}: actual loaded turbo`);
       assert.ok(Math.abs(ecu[i].effective + turbo[i].effective - total) < 1e-9, 'components reconstruct loaded torque');
-      if (unique < 0) assert.ok(Math.abs(turbo[i].effective - turbo[i].value) < 1e-3, 'no invented turbo sum correction');
+      if (unique < 0) {
+        // FUN_005b2c00 writes a point back only when its request differs from the current value, so a neutral
+        // byte keeps a stock point that lies outside the clamped range (e.g. above the power cap) unclamped.
+        const kept = cheat[TURBO_OFF + i] === NEUTRAL_BYTE && (turbo[i].stock > turbo[i].max || turbo[i].stock < turbo[i].min);
+        const want = kept ? turbo[i].stock : turbo[i].value;
+        assert.ok(Math.abs(turbo[i].effective - want) < 1e-3, `turbo/${i}: no invented turbo sum correction`);
+      }
     }
   }
 });
@@ -1290,8 +1300,10 @@ test('game data: drivetrain rows follow the game gear speed and range clamps', {
     assert.ok(Math.abs(r.ratio - r.stock) < 1e-6, `${r.label}: neutral is stock`);
     assert.ok(r.min <= r.ratio && r.ratio <= r.max, r.label);
     if (r.speed === null) continue;
-    const kmh = wheel * f(0x1f4) * 0.10471204 / (f(0x1b8) * r.ratio) * 3.6;
-    assert.ok(Math.abs(r.speed - kmh) < 1e-3, `${r.label}: FUN_0059b5c0 speed`);
+    // FUN_0059b5c0 uses the float constant stored at 0x7A1D38 (bytes 44 77 D6 3D = 0.10471966862678528), not the
+    // power factor 0.10471204, and computes in float32; compare in double with a float32-sized relative tolerance.
+    const kmh = wheel * f(0x1f4) * 0.10471966862678528 / (f(0x1b8) * r.ratio) * 3.6;
+    assert.ok(Math.abs(r.speed - kmh) <= kmh * 1e-6, `${r.label}: FUN_0059b5c0 speed`);
     assert.ok(r.minSpeed! <= r.speed && r.speed <= r.maxSpeed!, r.label);
   }
   const fd = gearing.rows[6];
