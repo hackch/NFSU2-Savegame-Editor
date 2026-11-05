@@ -4,6 +4,45 @@ A browser-based career save editor for Need for Speed: Underground 2 (`SPEED2.EX
 
 The live site is deployed to GitHub Pages from `main`. See [doc.md](doc.md) for what we know about the save format.
 
+## Savefile discovery map
+
+![Byte-level discovery grid of the NFSU2 career save](save-coverage.svg)
+
+The reference career save is **54,966 bytes (`0xD6B6`, 53.68 KiB)**. Read the grid left to right, top to bottom: each cell represents **64 bytes**, each row **2,048 bytes**. Mixed cells show the exact proportions of the three states, not a whole-cell approximation.
+
+| Evidence state | Bytes | File coverage |
+| --- | ---: | ---: |
+| Deciphered: field meaning and encoding known | 5,239 | **9.53%** |
+| Located inside a known structure, semantics incomplete | 6,104 | **11.11%** |
+| Payload not assigned to a specific structure/field | 43,623 | **79.36%** |
+| **Located in total (includes deciphered)** | **11,343** | **20.64%** |
+
+This is a conservative, byte-weighted inventory of current repository evidence, **not a percentage of game features implemented or exhaustively verified in-game**. The header's two block boundaries locate the outer container only; they do not make all its payload "discovered."
+
+| Located structure | Absolute range (end exclusive) | Size | Deciphered bytes |
+| --- | --- | ---: | ---: |
+| Header | `0x0000`–`0x001C` | 28 | 26 |
+| Block A payload | `0x001C`–`0x0024` | 8 | 0 |
+| Five native car records | `0x5868`–`0x8022` | 10,170 | 5,035 |
+| Money and garage count | `0xA16A`–`0xA16E`; `0xA175` | 5 | 5 |
+| Event count and 137 observed entries | `0xA179`–`0xA5C5` | 1,100 | 141 |
+| Driver-name field | `0xD225`–`0xD245` | 32 | 32 |
+
+Each car contributes **1,007 deciphered bytes**: its native slot handle (4), identity hash (4), 170 visual hashes (680), nine unique-performance flags (36), 68 installed-item positions (68), five dyno setups (205), lock/bought flags (2), and the first eight ownership bytes (8). Visual hashes include derived/unused slots; deciphering their stored representation does not mean every slot is independently editable.
+
+The 420 category-unlock offsets are **sparse**, not a contiguous table. Eight overlap the mapped performance ownership bytes; the remaining 412 per car stay amber because individual-part semantics are not established. The ninth ownership byte also stays amber because its visual-purchase interpretation is unverified. Donor-copy blocks, record gaps and zero-filled bytes are not automatically counted as deciphered. In the event array, only its count and each entry's traced status byte (`+6`) are counted as deciphered; the rest remains amber. The observed entry count does not establish the table's full capacity.
+
+Scope: the repository's `testfile/treav0r` career file, including empty car records; separate ZIP/GARAGE.DAT bytes are excluded. Evidence comes from [layout constants](src/model/layout.ts), [save validation](src/model/save-file.ts), [performance mappings](src/model/perf.ts), [dyno layouts](src/model/dyno.ts), [unlock ranges](src/data/unlock-table.ts), and the serializer/event traces in [technical.md](technical.md). Byte coverage counts overlapping interpretations only once.
+
+Regenerate after updating the evidence ranges in [scripts/save-coverage.mjs](scripts/save-coverage.mjs):
+
+```sh
+npm run build
+node scripts/save-coverage.mjs
+```
+
+The generator checks the reference file's structure and checksums, rejects invalid/duplicate evidence ranges, and verifies that the grid accounts for every byte exactly once.
+
 ## Features
 
 - Edit driver name and money, with checksums recalculated on download.

@@ -15,6 +15,8 @@ This file records what we know about the `SPEED2.EXE` career save (`20CM` magic,
 | Offset | Size | Meaning |
 | --- | --- | --- |
 | `0x00` | 4 | Magic `20CM` |
+| `0x04` | 2 | Total file length, uint16 LE |
+| `0x06` | 2 | Unknown header bytes |
 | `0x08` | 4 | Block A length |
 | `0x0C` | 4 | Block B length |
 | `0x10` | 4 | CRC of block A |
@@ -23,7 +25,7 @@ This file records what we know about the `SPEED2.EXE` career save (`20CM` magic,
 | `0xA16A` | 4 | Money, int32 (max `0x7FFFFFFF`) |
 | `0xA175` | 1 | Garage count, capped at 6 |
 | `0xD225` | 32 | Driver name, Latin-1, at most 31 characters |
-| `0xD226`, `0xD6B5` | ? | Unknown. May be checksums or headers (**unverified**) |
+| `0xD6B5` | 1 | Unknown final byte; `0xD226` is inside the driver-name field, not a separate checksum |
 
 ## Checksums
 
@@ -33,7 +35,7 @@ This file records what we know about the `SPEED2.EXE` career save (`20CM` magic,
 
 ## Car slots
 
-- Five slots start at `0x5870`, with a stride of `0x7F2`.
+- Five native records start at `0x5868`, with a stride of `0x7F2` (2,034 bytes). The editor's slot base is eight bytes later, at `0x5870`. The record's `+4` dword is its `CAREER_SLOT_<n>` handle.
 - Each slot has the following areas, relative to the slot base:
 
 | Relative offset | Size | Meaning |
@@ -42,12 +44,14 @@ This file records what we know about the `SPEED2.EXE` career save (`20CM` magic,
 | `+0x014` | 4 | Car type hash (uint32 LE); used for names and GLOBALB.BUN physics |
 | `+0x0E0` | `0x1D0` | Donor block 2 |
 | `+0x2B0` | `0x14` | Donor block 3, end-of-car data |
-| `+0x27C` | 24 | Used header. A non-zero uint16 means the slot is used |
-| `+0x294` | 16 | Link block. All zero means not linked (does not decide the lock) |
-| `+0x2BC` | 4 | Model key (the last 4 bytes of donor block 3) |
+| `+0x018` | 680 | 170 visual-part hashes (uint32 LE); includes window tint at `+0x27C` and visual slot 169 at `+0x2BC` |
 | `+0x2E8` | 36 | Nine unique-performance uint32 fields; separate from ordinary installed flags |
 | `+0x310` | 68 | Installed-item flags, including 12 visual-related bytes |
-| `+0x462` | 420 | Unlock table, bytes `00` or `FF` |
+| `+0x354` | 205 | Five 41-byte dyno setups |
+| `+0x428` | 1 | Slot lock flag |
+| `+0x429` | 1 | Car bought flag |
+| `+0x586` | 9 | Indexed performance ownership bitset; ninth byte's visual-purchase semantics remain unverified |
+| Sparse ranges within `+0x462`–`+0x7E1` | 420 | Broad category-unlock edits; overlaps the first eight ownership bytes, not a contiguous 420-byte table |
 
 - Donor blocks are read from absolute offsets `0x5870`, `0x5950`, and `0x5B20`.
 - The car type hash at `+0x014` maps to a car through the donor list in `car-donors.json`. Variants of the same car (base, sponsor and intro) show the first name listed. The `+0x2BC` model key is not a unique car identity: Sentra, Golf and Tiburon share `FA26AF42`; Audi TT and Celica share `78ADB9AF`. Replacement already writes the type hash in donor block 1. Slot names and DYNO use the same hash reader.
@@ -61,7 +65,7 @@ This file records what we know about the `SPEED2.EXE` career save (`20CM` magic,
 
 ### Unlock table
 
-- 420 bytes at `+0x462` to `+0x7E1`, split into four categories:
+- 420 selected bytes in sparse ranges within `+0x462` to `+0x7E1`, split into four categories. Do not count every intervening byte as an unlock:
 
 | Category | Bytes |
 | --- | --- |
@@ -72,6 +76,7 @@ This file records what we know about the `SPEED2.EXE` career save (`20CM` magic,
 
 - The unlock ranges are in [src/data/unlock-table.ts](src/data/unlock-table.ts).
 - Setting a byte to `FF` marks it unlocked. Each byte's mapping to a specific part is **unverified**.
+- The eight performance-category bytes are also the indexed ownership bitset at `+0x586`–`+0x58D`; individual IDs are mapped by the bit formula in [technical.md](technical.md). The other 412 selected bytes have category-level evidence only.
 
 ## Locking
 
@@ -86,8 +91,8 @@ This file records what we know about the `SPEED2.EXE` career save (`20CM` magic,
 
 | Operation | What it writes |
 | --- | --- |
-| Replace car | Donor blocks 1–3 in the slot. Performance flags are zeroed. The used header and link block are copied from another slot if the target is empty. Clears the lock flag and sets the bought flag. Raises the garage count to at most 6 |
-| Swap slots | Whole slot blocks are swapped (**experimental**, untested in game) |
+| Replace car | Clears visual hashes, writes donor blocks 1–3, clears vinyls/colours, decal textures and neon/frame. Performance flags are zeroed; dyno setups are retained. No appearance is copied from a neighboring slot. Clears the lock flag and sets the bought flag. Raises the career garage count to at most 6 |
+| Swap slots | Exchanges bytes from the shifted slot base to the native record end, preserving each record's first eight bytes and handle (**experimental**, untested in game) |
 | Set money / name | Only the target field. Input values are never mutated |
 
 ## Module map
