@@ -4,10 +4,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { DynoModel, findCar, parseGameData } from '../model/dyno.js';
 
 // Reference values come from the unmodified game executable (SPEED2.EXE, sha256 f9dd86c0...68a7) run in a CPU
-// emulator that calls only its tuning-load and dyno functions (FUN_005b06a0 and the functions it uses); the method
-// is described in https://github.com/hackch/NFSU2-Savegame-Editor/pull/4. The fixture holds numbers only
-// (car type hash, installed bytes, uniques, setup bytes, unrounded results). The test needs the game's GLOBALB.BUN,
-// like the other game-data tests.
+// emulator that calls only its tuning-load and dyno functions (FUN_005b06a0 and the functions it uses). The fixture
+// holds numbers only (car type hash, installed bytes, uniques, setup bytes, unrounded results). The test needs the
+// game's GLOBALB.BUN, like the other game-data tests.
 const GAME_BUN = process.env.NFSU2_GLOBALB ?? 'C:/Program Files (x86)/EA GAMES/Need for Speed Underground 2/GLOBAL/GLOBALB.BUN';
 const SKIP = !existsSync(GAME_BUN) && 'GLOBALB.BUN (set NFSU2_GLOBALB) missing';
 
@@ -45,8 +44,7 @@ test('dyno model reproduces the game executable on 40 reference cases', { skip: 
 });
 
 test('interactive gear writer encodes bytes with the float32 writer of the load', { skip: SKIP }, () => {
-  // Review note on PR #4: Peugeot 106, all non-visual performance parts, no uniques, neutral setup. The native
-  // float32 writer (FUN_005b3ee0 -> FUN_0059af80) gives byte 82 for this final drive; a double encoder gives 81.
+  // Peugeot 106, all non-visual performance parts, no uniques, neutral setup: the native float32 writer gives 82.
   const game = parseGameData(new Uint8Array(readFileSync(GAME_BUN)));
   const car = findCar(game, 0x4b10070a);
   assert.ok(car, 'Peugeot 106 type hash');
