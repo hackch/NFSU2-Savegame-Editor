@@ -384,6 +384,8 @@ export function findCar(game: GameData, hash: number): CarRecord | null {
 const R = (car: CarRecord, off: number): number => car.view.getFloat32(off, true);
 const clamp = (v: number, lo: number, hi: number): number => Math.min(Math.max(v, lo), hi);
 const byteT = (b: number): number => clamp((b - 100) * 0.01, -1, 1);
+// Float32 variant for the gear decode (FUN_0059aee0, FUN_005b4780): (b-100)*0.01f.
+const byteT32 = (b: number): number => clamp(Math.fround(Math.fround(b - 100) * Math.fround(0.01)), -1, 1);
 
 function clonePhys(p: Phys): Phys {
   return { f: p.f.slice(), gearCount: p.gearCount };
@@ -463,7 +465,8 @@ export class DynoModel {
     }
     ({ f, out } = this.fraction(1, 3));
     if (f) {
-      const lvl = Math.trunc(out[0] * 3 + 0.5);
+      // FUN_005a6bd0 picks the gear set from the third transmission fraction, not the first.
+      const lvl = Math.trunc(out[2] * 3 + 0.5);
       if (lvl >= 1 && lvl <= 3) {
         const gs = 0x310 + lvl * 0x40;
         s(p, 0x1b8, R(c, gs + 8)); s(p, 0x1bc, R(c, gs + 0xc)); s(p, 0x1c0, R(c, gs + 0x10));
@@ -568,8 +571,12 @@ export class DynoModel {
 
   private static ratioAt(p: Phys, speed: number): number {
     const bias = g(p, 0x1c0);
-    const r = bias < 0.2 ? g(p, 0x50) : bias > 0.8 ? g(p, 0x80) : g(p, 0x80) * bias + (1 - bias) * g(p, 0x50);
-    return r / speed * (g(p, 0x1f4) * RAD_PER_RPM / g(p, 0x1b8));
+    // FUN_0059b5c0 works in float32 with 2*pi/60 = 0.10471967f (0x7A1D38), not the power factor 0.10471204.
+    const f = Math.fround, b = f(bias);
+    const r = b < f(0.2) ? f(g(p, 0x50)) : b > f(0.8) ? f(g(p, 0x80))
+      : f(f(f(1 - b) * f(g(p, 0x50))) + f(f(g(p, 0x80)) * b));
+    const w = f(f(g(p, 0x1f4)) * f(0.10471966862678528));
+    return f(f(r / f(speed)) * f(w / f(g(p, 0x1b8))));
   }
 
   private modifyBounds(param: number, lo: number, hi: number): [number, number] {
@@ -721,22 +728,25 @@ export class DynoModel {
   private setGear(p: Phys, value: number, param: number): void {
     const arr: number[] = [];
     for (let k = 10; k <= 15; k++) arr[k] = g(p, 0x1b0 + k * 4);
-    const ed = (v: number, q: number): number => {
-      const [mn, mx] = this.range(p, q);
+    // FUN_005b2ed0 runs in float32 (ratios, ranges, the 0.05f spacing and the excess sums).
+    const fr = Math.fround, SP = fr(GEAR_SPACING);
+    const ed = (v0: number, q: number): number => {
+      const v = fr(v0);
+      const [mn, mx] = this.range(p, q).map(fr) as [number, number];
       const c = clamp(v, mn, mx);
-      const d = v - arr[q];
+      const d = fr(v - arr[q]);
       if (d === 0) return 0;
       const dir = d > 0 && q >= 11 ? -1 : d < 0 && q < 15 ? 1 : 0;
-      let exc = v - c;
+      let exc = fr(v - c);
       if (dir) {
         const n = q + dir;
         const cur = arr[n];
         let next = cur;
-        if (dir > 0 && cur > c - GEAR_SPACING) next = c - GEAR_SPACING;
-        else if (dir < 0 && cur < c + GEAR_SPACING) next = c + GEAR_SPACING;
-        if (next !== cur) exc += ed(next, n);
+        if (dir > 0 && cur > fr(c - SP)) next = fr(c - SP);
+        else if (dir < 0 && cur < fr(c + SP)) next = fr(c + SP);
+        if (next !== cur) exc = fr(exc + ed(next, n));
       }
-      arr[q] = v - exc;
+      arr[q] = fr(v - exc);
       return exc;
     };
     ed(value, param);
@@ -781,7 +791,9 @@ export class DynoModel {
       const def = this.defs.get(prm);
       if (def === undefined) continue;
       const [lo, hi] = this.range(p, prm);
-      const v = (hi - lo) * byteT(setup[prm]) + def;
+      // FUN_0059aee0 / FUN_005b4780 decode in float32: (max-min)*t+def.
+      const f = Math.fround;
+      const v = f(f(f(f(hi) - f(lo)) * byteT32(setup[prm])) + f(def));
       if (prm === 9) {
         const cv = clamp(v, lo, hi);
         s(p, 0x1b8, cv); s(p, 0x1bc, cv);
@@ -793,7 +805,8 @@ export class DynoModel {
       const def = this.defs.get(prm);
       if (def === undefined) continue;
       const [lo, hi] = this.range(p, prm);
-      const value = clamp((hi - lo) * byteT(gearBytes[prm]) + def, lo, hi);
+      const f = Math.fround;
+      const value = clamp(f(f(f(f(hi) - f(lo)) * byteT32(gearBytes[prm])) + f(def)), lo, hi);
       this.setGear(p, value, prm);
       // The load's second pass re-encodes every active gear before reading the next byte.
       for (let gear = 10; gear <= 15; gear++) {
@@ -801,7 +814,10 @@ export class DynoModel {
         if (gearDef === undefined) continue;
         const [min, max] = this.range(p, gear);
         const ratio = clamp(g(p, 0x1b0 + gear * 4), min, max);
-        gearBytes[gear] = clamp(Math.floor(100.5 + 100 * (ratio - gearDef) / (max - min)), 0, MAX_TUNE_BYTE);
+        // FUN_005b3ee0 -> FUN_0059af80 encode in float32: trunc(frac*100f + 100.5f).
+        const f = Math.fround;
+        const frac = f(f(f(ratio) - f(gearDef)) / f(f(max) - f(min)));
+        gearBytes[gear] = clamp(Math.floor(f(f(frac * 100) + 100.5)), 0, MAX_TUNE_BYTE);
       }
     }
     applyScalars(16, 22);
@@ -814,7 +830,12 @@ export class DynoModel {
       const defs = this.curveDefs.get(prm) as number[];
       for (let i = 0; i < 9; i++) {
         const [lo, hi] = this.range(p, prm, i);
-        const v = clamp((hi - lo) * byteT(setup[off + i]) + defs[i], lo, hi);
+        const req = (hi - lo) * byteT(setup[off + i]) + defs[i];
+        // FUN_005b2c00 writes nothing when the request equals the current point exactly (neutral byte), so a
+        // default above the power cap is kept unclamped.
+        const cur = prm === P_ECU ? g(p, 0x200 + 4 * i) - g(p, 0x224 + 4 * i) : g(p, 0x224 + 4 * i);
+        if (req === cur) continue;
+        const v = clamp(req, lo, hi);
         if (prm === P_ECU) {
           s(p, 0x200 + 4 * i, v + g(p, 0x224 + 4 * i));
         } else {
@@ -1115,16 +1136,21 @@ export class DynoModel {
  * peak power helper (`FUN_005ac980`). The torque table is in kN·m, so power comes out in kW.
  */
 function peaks(p: Phys): Pick<DynoResult, 'peakTorque' | 'peakTorqueRpm' | 'peakPower' | 'peakPowerRpm'> {
-  const { tab, idle, inv } = torqueTable(p);
-  const red = g(p, 0x1f8);
+  // FUN_005b5810 / FUN_005b56e0 sample the float32 interpolation. On a flat stretch of the curve the float32
+  // rounding decides which 50-rpm sample is the (strictly greater) maximum, so the peak rpm follows it.
+  const f = Math.fround;
+  const tab = Array.from({ length: 9 }, (_, i) => f(g(p, 0x200 + 4 * i)));
+  const idle = f(g(p, 0x1f0)), red = f(g(p, 0x1f8));
+  const inv = f(8 / f(red - idle));
+  const kwf = f(1.0471204e-4);
   let peakTorque = 0, peakTorqueRpm = idle, peakPower = 0, peakPowerRpm = idle;
-  for (let rpm = idle; rpm < red; rpm += 50) {
-    const nm = interp(tab, idle, inv, rpm) * 1000;
-    const kw = nm * rpm * 1.0471204e-4;
-    if (nm > peakTorque) { peakTorque = nm; peakTorqueRpm = rpm; }
-    if (kw > peakPower) { peakPower = kw; peakPowerRpm = rpm; }
+  for (let rpm = idle; rpm < red; rpm = f(rpm + 50)) {
+    const t = interp32(tab, idle, inv, rpm);
+    const kw = f(f(f(t * 1000) * rpm) * kwf);
+    if (peakTorque < t) { peakTorque = t; peakTorqueRpm = rpm; }
+    if (peakPower < kw) { peakPower = kw; peakPowerRpm = rpm; }
   }
-  return { peakTorque, peakTorqueRpm, peakPower, peakPowerRpm };
+  return { peakTorque: peakTorque * 1000, peakTorqueRpm, peakPower, peakPowerRpm };
 }
 
 function drive(p: Phys): { fd: number; invR: number } {
@@ -1149,25 +1175,51 @@ function torqueTable(p: Phys): { tab: number[]; idle: number; inv: number } {
   return { tab: Array.from({ length: 9 }, (_, i) => g(p, 0x200 + 4 * i)), idle, inv: 8 / (g(p, 0x1f8) - idle) };
 }
 
+// Single-precision port of FUN_005b06a0 in the game's operation order. The game keeps every state variable
+// (speed, distance, time, shift counter) in float32 and runs the x87 at 24-bit precision, so each operation
+// rounds to float32. Differences to a double simulation: the shift counter (+-1/60 * 3 / 1.5) reaches
+// 0.99999994 instead of 1.0 after 40 recovery steps, which costs one extra cut/power frame pair per gear
+// change, and the cut branch requires counter > 0 (not >= 0).
+const fr = Math.fround;
+
+function interp32(table: ArrayLike<number>, x0: number, invDx: number, x: number): number {
+  const t = fr(fr(x - x0) * invDx);
+  const i = Math.trunc(t);
+  if (i < 0 || !(t >= 0)) return table[0];
+  if (i >= table.length - 1) return table[table.length - 1];
+  const f = fr(t - i);
+  return fr(fr(f * table[i + 1]) + fr(fr(1 - f) * table[i]));
+}
+
 function dragSim(p: Phys, carIndex: number): Pick<DynoResult, 't60' | 't100' | 'quarterMile' | 'trapSpeed' | 'quarterExact'> {
-  const { tab, idle, inv } = torqueTable(p);
-  const { fd, invR } = drive(p);
-  const sh = shiftPoints(p);
-  const mass = g(p, 0x110), k = g(p, 0x260);
-  const gears = Array.from({ length: p.gearCount }, (_, i) => g(p, 0x1d8 + 4 * i));
+  const G = (o: number): number => fr(g(p, o));
+  const tab = Array.from({ length: 9 }, (_, i) => G(0x200 + 4 * i));
+  const idle = G(0x1f0), red = G(0x1f8), shift = G(0x1f4);
+  const inv = fr(8 / fr(red - idle));
+  const bias = G(0x1c0), nb = fr(1 - bias);
+  const fd = fr(fr(bias * G(0x1bc)) + fr(nb * G(0x1b8)));
+  const invR = fr(1 / fr(fr(nb * G(0x20)) + fr(bias * G(0x80))));
+  const n = p.gearCount;
+  const sh: number[] = [];
+  for (let k = 2; k <= n; k++) sh[k] = fr(shift - 100);
+  sh[n + 1] = fr(red + 500);
+  const mass = G(0x110), k = G(0x260);
+  const gears = Array.from({ length: n }, (_, i) => G(0x1d8 + 4 * i));
+  const dt = fr(1 / 60), mph = fr(MPH), cut = [fr(-3), 0, fr(1.5)];
   let gear = 0, v = 0, x = 0, t = 0, c = 1, phase = 1, just = false;
-  let t60 = Infinity, t100 = Infinity, qm = Infinity, trap = 0, qmExact = Infinity;
-  for (let step = 0; step < 60 * 120; step++) {
+  let t60 = 0, t100 = 0, qm = 0, trap = 0, qmExact = Infinity;
+  for (let step = 0; step < 0xf423f; step++) {
     const gr = gears[gear] ?? 0;
-    const rpm = invR * v * gr * fd * 9.5493;
+    const rpm = fr(fr(fr(fr(invR * v) * gr) * fd) * fr(9.549304));
     let a: number;
-    if (just || !((sh[gear + 2] ?? Infinity) - 100 < rpm)) {
+    const thr = sh[gear + 2] === undefined ? NaN : fr(-100 + sh[gear + 2]);
+    if (just || !(thr < rpm)) {
       just = false;
-      a = interp(tab, idle, inv, rpm) * gr * fd * invR / mass;
+      a = fr(fr(fr(fr(interp32(tab, idle, inv, rpm) * gr) * fd) * invR) / mass);
     } else {
       just = true;
-      c += DT * (phase ? -3 : 1.5);
-      if (c >= 0) {
+      c = fr(fr(dt * cut[phase ? 0 : 2]) + c);
+      if (c > 0) {
         just = c < 1;
         if (!just) { gear++; c = 1; phase = 1; }
       } else {
@@ -1175,19 +1227,20 @@ function dragSim(p: Phys, carIndex: number): Pick<DynoResult, 't60' | 't100' | '
       }
       a = 0;
     }
-    t += DT;
-    const dv = (a - v * k * v / mass) * DT;
-    x += (0.5 * dv + v) * DT;
-    v += dv;
-    if (t60 === Infinity && v * MPH >= 60) t60 = t * (F60[carIndex] ?? 0);
-    if (t100 === Infinity && v * MPH >= 100) t100 = t * (F100[carIndex] ?? 0);
-    if (qm === Infinity && x >= QUARTER_MILE_M) {
-      qm = t; trap = v * MPH;
+    t = fr(dt + t);
+    const dv = fr(fr(a - fr(fr(fr(v * k) * v) / mass)) * dt);
+    x = fr(fr(fr(fr(0.5 * dv) + v) * dt) + x);
+    v = fr(dv + v);
+    if (t60 === 0 && 60 <= fr(v * mph)) t60 = fr(t * fr(F60[carIndex] ?? 0));
+    if (t100 === 0 && 100 <= fr(v * mph)) t100 = fr(t * fr(F100[carIndex] ?? 0));
+    if (qm === 0 && QUARTER_MILE_M <= x) {
+      qm = t; trap = v;
       qmExact = t - (x - QUARTER_MILE_M) / Math.max(v, 1e-6);
     }
-    if (t60 !== Infinity && t100 !== Infinity && qm !== Infinity) break;
+    if (t60 !== 0 && t100 !== 0 && qm !== 0 && trap !== 0) break;
   }
-  return { t60, t100, quarterMile: qm, trapSpeed: trap, quarterExact: qmExact };
+  const z = (q: number): number => (q === 0 ? Infinity : q);
+  return { t60: z(t60), t100: z(t100), quarterMile: z(qm), trapSpeed: trap * MPH, quarterExact: qmExact };
 }
 
 function topSpeed(p: Phys): number {
@@ -1211,8 +1264,14 @@ function topSpeed(p: Phys): number {
   }
   if (!forces.length) return 0;
   const vmax = v;
+  // FUN_005b5ab0 zeroes the last computed force, spans the n forces over [0, vmax] with n-1 intervals (spacing
+  // vmax/(n-1), not SPEED_STEP) and resamples them to the 64-point table that FUN_005b5930 walks while sp <= vmax.
+  const n = forces.length;
+  forces[n - 1] = 0;
+  const TOP_N = 64;
+  const res = Array.from({ length: TOP_N }, (_, i) => interp(forces, 0, (n - 1) / vmax, i * vmax / (TOP_N - 1)));
   let sp = 0;
-  while (sp < vmax && sp * k * sp / mass <= interp(forces, 0, 1 / SPEED_STEP, sp)) sp += SPEED_STEP;
+  while (sp <= vmax && sp * k * sp / mass <= interp(res, 0, (TOP_N - 1) / vmax, sp)) sp += SPEED_STEP;
   const limit = g(p, 0x290);
   return limit > 0 && limit * 0.44703 < sp ? limit * 0.44703 : sp;
 }
