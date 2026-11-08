@@ -1433,6 +1433,17 @@ test('controller applies optional gearing and edits ECU/turbo drafts', { skip: S
   scope.curvePointer(pointer(chart.columns[8].x + 1, chart.top, 1), true);
   assert.equal(scope.tuning.dyno.point, 8);
   expected[TURBO_OFF + 8] = turbo[8].maxByte;
+
+  const touch = (x: number, y: number) =>
+    ({ clientX: x, clientY: y, buttons: 1, isTouch: true, currentTarget: svg, preventDefault() {} }) as unknown as MouseEvent;
+  const col5 = chart.columns[5];
+  const p5Before = scope.tuning.dyno.chart!.columns[5];
+  scope.curvePointer(touch(col5.x + 1, chart.top), true);
+  assert.equal(scope.tuning.dyno.point, 5);
+  assert.equal(scope.tuning.dyno.dragging, true);
+  assert.equal(scope.tuning.dyno.chart!.columns[5].valueY, p5Before.valueY, 'touch does not snap on start');
+  scope.curvePointerUp();
+  assert.equal(scope.tuning.dyno.dragging, false);
   scope.selectCurve('ecu');
   scope.tuning.dyno.cheat = false;
   scope.selectPoint(4);
