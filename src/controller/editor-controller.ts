@@ -93,7 +93,7 @@ export function EditorController($scope: EditorScope): void {
     dyno: {
       gameName: '', gameError: '', setup: 1, setupNames: SETUP_NAMES, strategy: '', optimizeGearing: false,
       carName: '', blocked: '', busy: false, rows: [], hasProposal: false,
-      curveTabs: [], curve: 'ecu', cheat: false, point: 0, chart: null, gear: 0, drive: null, scalars: [],
+      curveTabs: [], curve: 'ecu', cheat: false, point: 0, chart: null, gear: 0, drive: null, scalars: [], dragging: false,
     },
   };
 
@@ -360,7 +360,10 @@ export function EditorController($scope: EditorScope): void {
   function setCurvePoint(index: number, point: CurvePoint, byte: number): void {
     const kind = $scope.tuning.dyno.curve;
     if (kind !== 'ecu' && kind !== 'turbo') return;
-    if (byte === point.byte) { rebuildDyno(); return; }
+    if (byte === point.byte) {
+      if (draggingPoint === null) rebuildDyno();
+      return;
+    }
     if ($scope.tuning.dyno.cheat) editPoints((bytes, off) => { bytes[off + index] = byte; });
     else editSetup((bytes, model) => model.withCurvePoint(bytes, kind, index, DynoModel.curveValue(point, byte)));
   }
@@ -864,12 +867,44 @@ export function EditorController($scope: EditorScope): void {
     rebuildDyno();
   };
 
+  let draggingPoint: number | null = null;
+  let touchStartY: number | null = null;
+  let touchStartByte: number | null = null;
+
+  const onGlobalUp = (): void => {
+    if (draggingPoint !== null || touchStartY !== null) {
+      draggingPoint = null;
+      touchStartY = null;
+      touchStartByte = null;
+      if ($scope.tuning.dyno.dragging) {
+        $scope.$evalAsync(() => {
+          $scope.tuning.dyno.dragging = false;
+          rebuildDyno();
+        });
+      }
+    }
+  };
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('mouseup', onGlobalUp);
+    $scope.$on('$destroy', () => {
+      window.removeEventListener('mouseup', onGlobalUp);
+    });
+  }
+
   $scope.selectCurve = function (kind: DynoTab): void {
+    draggingPoint = null;
+    touchStartY = null;
+    touchStartByte = null;
+    $scope.tuning.dyno.dragging = false;
     $scope.tuning.dyno.curve = kind;
     rebuildDyno();
   };
 
   $scope.selectPoint = function (index: number): void {
+    draggingPoint = null;
+    touchStartY = null;
+    touchStartByte = null;
+    $scope.tuning.dyno.dragging = false;
     $scope.tuning.dyno.point = Math.min(Math.max(index, 0), CURVE_POINTS - 1);
     rebuildDyno();
   };
@@ -882,6 +917,10 @@ export function EditorController($scope: EditorScope): void {
   };
 
   $scope.resetCurve = function (): void {
+    draggingPoint = null;
+    touchStartY = null;
+    touchStartByte = null;
+    $scope.tuning.dyno.dragging = false;
     if ($scope.tuning.dyno.curve === 'drive') {
       const current = currentGearing();
       if (current) editSetup((bytes) => { for (const row of current.gearing.rows) bytes[row.param] = NEUTRAL_BYTE; return bytes; });
@@ -932,17 +971,72 @@ export function EditorController($scope: EditorScope): void {
 
   $scope.curvePointer = function (event: MouseEvent, start: boolean): void {
     const view = $scope.tuning.dyno, chart = view.chart, points = currentPoints();
-    if (!chart || !points || view.busy || (!start && (event.buttons & 1) === 0)) return;
-    if (start) event.preventDefault();
-    const rect = (event.currentTarget as Element).getBoundingClientRect();
+    if (!chart || !points || view.busy) return;
+    const isTouch = Boolean((event as any).isTouch);
+    const isDown = (event.buttons & 1) !== 0 || isTouch;
+    if (!start && !isDown) {
+      if (draggingPoint !== null || touchStartY !== null) {
+        draggingPoint = null;
+        touchStartY = null;
+        touchStartByte = null;
+        view.dragging = false;
+        rebuildDyno();
+      }
+      return;
+    }
+    if (start && event.preventDefault) event.preventDefault();
+    const target = ((event.currentTarget || event.target) as Element);
+    const svgEl = (target && target.tagName && target.tagName.toLowerCase() === 'svg')
+      ? target
+      : (target?.closest?.('svg') ?? target);
+    const rect = svgEl?.getBoundingClientRect?.() ?? { left: 0, top: 0, width: chart.width, height: chart.height };
     if (!rect.width || !rect.height) return;
-    const x = (event.clientX - rect.left) / rect.width * chart.width;
-    const y = (event.clientY - rect.top) / rect.height * chart.height;
+    const clientX = 'clientX' in event ? event.clientX : ((event as any).touches?.[0]?.clientX ?? 0);
+    const clientY = 'clientY' in event ? event.clientY : ((event as any).touches?.[0]?.clientY ?? 0);
+    const x = (clientX - rect.left) / rect.width * chart.width;
+    const y = (clientY - rect.top) / rect.height * chart.height;
     const columnWidth = chart.columns[0].width;
-    const index = Math.min(Math.max(Math.floor((x - chart.left) / columnWidth), 0), CURVE_POINTS - 1);
-    const nm = (chart.bottom - y) / (chart.bottom - chart.top) * chart.yMax;
+
+    if (start || draggingPoint === null) {
+      draggingPoint = Math.min(Math.max(Math.floor((x - chart.left) / columnWidth), 0), CURVE_POINTS - 1);
+      view.dragging = true;
+      if (isTouch) {
+        touchStartY = y;
+        touchStartByte = points[draggingPoint].byte;
+        view.point = draggingPoint;
+        rebuildDyno();
+        return;
+      }
+    }
+    const index = draggingPoint;
     view.point = index;
-    setCurvePoint(index, points[index], DynoModel.curveByte(points[index], nm));
+    const col = chart.columns[index], point = points[index];
+    let byte: number;
+    if (isTouch && touchStartY !== null && touchStartByte !== null) {
+      const rangeH = col && col.rangeH > 0 ? col.rangeH : Math.max(chart.bottom - chart.top, 1);
+      const deltaY = y - touchStartY;
+      const byteSpan = Math.max(point.maxByte - point.minByte, 1);
+      const fraction = -deltaY / rangeH;
+      byte = Math.min(Math.max(Math.round(touchStartByte + fraction * byteSpan), point.minByte), point.maxByte);
+    } else if (col && point.max > point.min) {
+      const top = col.rangeY, bottom = col.rangeY + col.rangeH;
+      const fraction = Math.min(Math.max((bottom - y) / (bottom - top), 0), 1);
+      byte = Math.round(point.minByte + fraction * (point.maxByte - point.minByte));
+    } else {
+      const nm = (chart.bottom - y) / (chart.bottom - chart.top) * chart.yMax;
+      byte = DynoModel.curveByte(point, nm);
+    }
+    setCurvePoint(index, point, byte);
+  };
+
+  $scope.curvePointerUp = function (): void {
+    if (draggingPoint !== null || touchStartY !== null) {
+      draggingPoint = null;
+      touchStartY = null;
+      touchStartByte = null;
+      $scope.tuning.dyno.dragging = false;
+      rebuildDyno();
+    }
   };
 
   $scope.curveKey = function (event: KeyboardEvent): void {

@@ -165,6 +165,7 @@ export interface DynoView {
   gear: number;
   drive: GearChart | null;
   scalars: ScalarRow[];
+  dragging: boolean;
 }
 
 /** Top-level tuning tab. */
@@ -270,6 +271,7 @@ export interface EditorScope extends angular.IScope {
   stepPoint(delta: number): void;
   resetCurve(): void;
   curvePointer(event: MouseEvent, start: boolean): void;
+  curvePointerUp(event?: MouseEvent): void;
   curveKey(event: KeyboardEvent): void;
   download(): void;
 }

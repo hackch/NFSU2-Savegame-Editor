@@ -365,9 +365,11 @@
               Like the game's Gear Ratios screen: gear speeds are at the rev limiter with the current final drive. Click or drag a bar, or focus the list and use the arrow keys (Shift for bigger steps). Moving a gear pushes its neighbours to keep a 0.05 ratio gap. Ranges come from the installed transmission parts; the game clamps anything outside them when it loads the save.
             </p>
             <svg class="dyno-graph" tabindex="0" role="img" ng-if="tuning.dyno.chart"
+                 nfsu-dyno-curve
+                 ng-class="{ 'is-dragging': tuning.dyno.dragging }"
                  ng-attr-view_box="0 0 {{ tuning.dyno.chart.width }} {{ tuning.dyno.chart.height }}"
                  aria-label="{{ tuning.dyno.curve === 'ecu' ? 'ECU' : 'Turbo' }} torque graph. Left and right select an RPM point; up and down change it."
-                 ng-mousedown="curvePointer($event, true)" ng-mousemove="curvePointer($event, false)" ng-keydown="curveKey($event)">
+                 ng-keydown="curveKey($event)">
               <g class="dyno-grid">
                 <line ng-repeat="tick in tuning.dyno.chart.ticks track by $index"
                       ng-attr-x1="{{ tuning.dyno.chart.left }}" ng-attr-x2="{{ tuning.dyno.chart.width - 8 }}"
@@ -376,16 +378,20 @@
                       ng-attr-x="{{ tuning.dyno.chart.left - 6 }}" ng-attr-y="{{ tick.y + 4 }}" text-anchor="end">{{ tick.label }}</text>
               </g>
               <g ng-repeat="col in tuning.dyno.chart.columns track by col.index"
-                 ng-class="{ selected: tuning.dyno.point === col.index }" class="dyno-col">
+                 ng-class="{ selected: tuning.dyno.point === col.index, dragging: tuning.dyno.dragging && tuning.dyno.point === col.index }" class="dyno-col">
                 <rect class="dyno-col-bg" ng-attr-x="{{ col.x }}" ng-attr-y="{{ tuning.dyno.chart.top }}"
                       ng-attr-width="{{ col.width }}" ng-attr-height="{{ tuning.dyno.chart.bottom - tuning.dyno.chart.top }}"></rect>
                 <rect class="dyno-range" ng-attr-x="{{ col.x + 3 }}" ng-attr-y="{{ col.rangeY }}"
                       ng-attr-width="{{ col.width - 6 }}" ng-attr-height="{{ col.rangeH }}"></rect>
+                <line class="dyno-slider-track" ng-attr-x1="{{ col.x + col.width / 2 }}" ng-attr-x2="{{ col.x + col.width / 2 }}"
+                      ng-attr-y1="{{ col.rangeY }}" ng-attr-y2="{{ col.rangeY + col.rangeH }}"></line>
                 <rect class="dyno-value-bar" ng-attr-x="{{ col.x + 3 }}" ng-attr-y="{{ col.valueY }}"
                       ng-attr-width="{{ col.width - 6 }}" ng-attr-height="{{ col.valueH }}"></rect>
                 <line class="dyno-stock" ng-attr-x1="{{ col.x + 3 }}" ng-attr-x2="{{ col.x + col.width - 3 }}"
                       ng-attr-y1="{{ col.stockY }}" ng-attr-y2="{{ col.stockY }}"></line>
-                <circle class="dyno-dot" ng-attr-cx="{{ col.x + col.width / 2 }}" ng-attr-cy="{{ col.valueY }}" r="5"></circle>
+                <circle class="dyno-dot" ng-attr-cx="{{ col.x + col.width / 2 }}" ng-attr-cy="{{ col.valueY }}"
+                        ng-attr-r="{{ tuning.dyno.point === col.index ? (tuning.dyno.dragging ? 7 : 6) : 5 }}"></circle>
+                <circle class="dyno-dot-touch" ng-attr-cx="{{ col.x + col.width / 2 }}" ng-attr-cy="{{ col.valueY }}" r="18"></circle>
                 <line class="dyno-eff" ng-if="col.effY < col.valueY - 0.5 || col.effY > col.valueY + 0.5"
                       ng-attr-x1="{{ col.x + 6 }}" ng-attr-x2="{{ col.x + col.width - 6 }}"
                       ng-attr-y1="{{ col.effY }}" ng-attr-y2="{{ col.effY }}"></line>

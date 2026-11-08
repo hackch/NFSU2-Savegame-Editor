@@ -141,17 +141,25 @@
 .dyno-eff { stroke: #c58bff; stroke-width: 2; stroke-dasharray: 4 3; pointer-events: none; }
 .dyno-point .dyno-beyond { color: #c58bff; }
 .dyno-graph { display: block; width: 100%; max-width: 720px; height: auto; cursor: ns-resize; user-select: none; touch-action: none; }
+.dyno-graph, .dyno-graph * { touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .dyno-graph:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .dyno-grid line { stroke: var(--color-border); stroke-width: 1; }
 .dyno-axis { fill: var(--color-text-muted); font-size: 11px; font-family: inherit; }
-.dyno-col-bg { fill: transparent; }
+.dyno-col-bg { fill: transparent; transition: fill .12s ease; }
+.dyno-col:hover .dyno-col-bg { fill: rgba(255, 255, 255, .04); }
 .dyno-col.selected .dyno-col-bg { fill: rgba(90, 140, 255, .14); }
+.dyno-col.dragging .dyno-col-bg { fill: rgba(90, 140, 255, .22); }
 .dyno-range { fill: rgba(255, 90, 80, .18); stroke: rgba(255, 90, 80, .7); stroke-width: 1; }
+.dyno-slider-track { stroke: rgba(255, 255, 255, .14); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 2 3; pointer-events: none; }
+.dyno-col.selected .dyno-slider-track { stroke: rgba(80, 200, 200, .45); stroke-width: 2.5; stroke-dasharray: none; }
 .dyno-value-bar { fill: rgba(80, 200, 200, .35); }
 .dyno-col.selected .dyno-value-bar { fill: rgba(80, 200, 200, .55); }
 .dyno-stock { stroke: #ffd34d; stroke-width: 2; }
-.dyno-dot { fill: #fff; stroke: #0d0d0d; stroke-width: 1.5; }
-.dyno-col.selected .dyno-dot { fill: var(--color-primary); }
+.dyno-dot { fill: #fff; stroke: #0d0d0d; stroke-width: 1.5; transition: r .1s ease, fill .1s ease; }
+.dyno-dot-touch { fill: transparent; stroke: transparent; }
+.dyno-col:hover .dyno-dot { fill: #c0f0f0; }
+.dyno-col.selected .dyno-dot { fill: var(--color-primary); stroke: #fff; stroke-width: 2; }
+.dyno-col.dragging .dyno-dot { fill: #fff; stroke: var(--color-primary); stroke-width: 2.5; filter: drop-shadow(0 0 4px var(--color-primary)); }
 .dyno-point { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; font-variant-numeric: tabular-nums; }
 .dyno-point strong { min-width: 6.5em; color: var(--color-text-strong); }
 .dyno-point > span:not(.muted) { min-width: 5.5em; text-align: center; color: var(--color-text-strong); }
