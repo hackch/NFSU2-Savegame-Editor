@@ -282,6 +282,9 @@
           </div>
           <div class="dyno-controls">
             <strong>{{ tuning.dyno.carName }}</strong>
+            <button type="button" class="profile-action-btn" ng-click="ultimateTuneAll()" ng-disabled="tuning.dyno.busy || !tuning.dyno.gameName">
+              ULTIMATE TOP SPEED — ALL CARS
+            </button>
             <label class="dyno-gearing">
               <input type="checkbox" ng-model="tuning.dyno.optimizeGearing" ng-disabled="tuning.dyno.busy">
               Optimize gearing &amp; shift spacing
