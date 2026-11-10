@@ -845,37 +845,73 @@ export function EditorController($scope: EditorScope): void {
 
   /** Apply the top-speed objective to every supported filled garage slot and all five setups. */
   $scope.ultimateTuneAll = function (): void {
-    if (!data || !game || $scope.tuning.dyno.busy) {
+    const view = $scope.tuning.dyno;
+    if (!data || !game || view.busy) {
       setStatus('error', 'Load a career save and GLOBAL\\\\GLOBALB.BUN before tuning all cars.');
       return;
     }
-    if (!confirm('Create a top-speed tuning draft for every supported car and all five setups?\\n\\nOnly existing installed parts and in-game gear ranges are used. Original save remains unchanged until you download the edited save. Back up your save first.')) return;
-    let next = data.slice();
-    let tuned = 0, skipped = 0;
-    const notes: string[] = [];
-    for (let slot = 0; slot < slotCount(next); slot++) {
-      if (!isSlotUsed(next, slot) || isSlotLocked(next, slot)) { skipped++; continue; }
-      const sd = readSlotDyno(next, slot);
-      if (TRAFFIC_CARS.some((car) => car.hash === sd.hash)) { skipped++; continue; }
+    if (!confirm('Create a top-speed tuning draft for every supported filled car and all five setups?\\n\\nOnly existing installed parts and in-game gear ranges are used. The original save is unchanged until you download. Keep a backup.')) return;
+
+    const source = data;
+    let next = source.slice();
+    const jobs: { slot: number; setup: number; model: DynoModel; bytes: Uint8Array; carName: string }[] = [];
+    const completed = new Set<number>();
+    const skippedSlots: string[] = [];
+    const topBySlot = new Map<number, number>();
+
+    for (let slot = 0; slot < slotCount(source); slot++) {
+      if (!isSlotUsed(source, slot) || isSlotLocked(source, slot)) { skippedSlots.push(`Slot ${slot + 1}: empty or locked`); continue; }
+      const sd = readSlotDyno(source, slot);
+      if (TRAFFIC_CARS.some((car) => car.hash === sd.hash)) { skippedSlots.push(`Slot ${slot + 1}: experimental traffic car`); continue; }
       const car = findCar(game, sd.hash);
-      if (!car) { skipped++; continue; }
+      if (!car) { skippedSlots.push(`Slot ${slot + 1}: car not found in GLOBALB.BUN`); continue; }
       const model = new DynoModel(game, car, sd.installed, sd.uniques);
-      if (!model.ecuTunable && !model.turboTunable && !model.gearingParameters.length) { skipped++; continue; }
-      let slotTop = 0;
-      for (let setup = 0; setup < SETUP_NAMES.length; setup++) {
-        const result = optimizeSetup(model, sd.setups[setup], 'top', true);
-        next = setSetupTuning(next, slot, setup as DynoEvent, result.setup, true, false);
-        slotTop = Math.max(slotTop, result.after.topSpeed * MPH_TO_KMH);
+      if (!model.ecuTunable && !model.turboTunable && !model.gearingParameters.length) {
+        skippedSlots.push(`Slot ${slot + 1}: no supported tuning parts`);
+        continue;
       }
-      tuned++;
-      notes.push(`${car.name}: ${Math.round(slotTop)} km/h simulated max`);
+      for (let setup = 0; setup < SETUP_NAMES.length; setup++) {
+        jobs.push({ slot, setup, model, bytes: sd.setups[setup], carName: car.name });
+      }
     }
-    if (!tuned) {
+
+    if (!jobs.length) {
       setStatus('error', 'No supported filled cars were available. Check the save, installed parts and GLOBALB.BUN.');
       return;
     }
-    applyResult(next);
-    setStatus('success', `Top-speed tuning prepared for ${tuned} cars across all five setups; ${skipped} slots skipped. Dyno figures are estimates, not a guarantee of 350 km/h. ${notes.join(' | ')} Download to save.`);
+
+    view.busy = true;
+    setStatus('', `Preparing top-speed tunes: 0 / ${jobs.length} setups…`);
+    const runNext = (): void => {
+      if (data !== source) {
+        view.busy = false;
+        setStatus('error', 'The save changed while tuning was running. The unfinished batch was discarded.');
+        return;
+      }
+      const job = jobs.shift();
+      if (!job) {
+        view.busy = false;
+        if (!completed.size) {
+          setStatus('error', 'No setup could be optimized. The save was not changed.');
+          return;
+        }
+        applyResult(next);
+        const notes = Array.from(topBySlot, ([slot, speed]) => `slot ${slot + 1}: ${Math.round(speed)} km/h`);
+        setStatus('success', `Top-speed optimization applied to ${completed.size} cars (${completed.size * SETUP_NAMES.length} setups attempted); ${skippedSlots.length} slots skipped. Simulated estimates: ${notes.join(' | ')}. This does not guarantee 350 km/h; the game's physics, installed parts and speed limiter still apply. Download to save.`);
+        return;
+      }
+      try {
+        const result = optimizeSetup(job.model, job.bytes, 'top', true);
+        next = setSetupTuning(next, job.slot, job.setup as DynoEvent, result.setup, true, false);
+        completed.add(job.slot);
+        topBySlot.set(job.slot, Math.max(topBySlot.get(job.slot) ?? 0, result.after.topSpeed * MPH_TO_KMH));
+      } catch (err) {
+        skippedSlots.push(`Slot ${job.slot + 1} / ${SETUP_NAMES[job.setup]}: ${errorMessage(err)}`);
+      }
+      setStatus('', `Preparing top-speed tunes: ${jobs.length ? jobs.length + 1 : 1} remaining…`);
+      setTimeout(() => $scope.$apply(runNext), 0);
+    };
+    setTimeout(() => $scope.$apply(runNext), 30);
   };
 
   $scope.applyDyno = function (): void {
