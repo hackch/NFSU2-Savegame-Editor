@@ -17,7 +17,7 @@ import { TRAFFIC_CARS } from '../data/traffic-cars.js';
 import { setSlotTrafficCar } from '../model/slots.js';
 import { colorPalettes, isVisualColorSlot, parseVisualData, readVisual, VISUAL_SLOTS, VisualCatalog } from '../model/visual.js';
 import {
-  CURVE_POINTS, DynoModel, ECU_OFF, findCar, KW_TO_HP, MPH_TO_KMH, NEUTRAL_BYTE, NM_TO_LBFT, optimizeDynoSetup, parseGameData,
+  CURVE_POINTS, DynoModel, ECU_OFF, findCar, KW_TO_HP, MPH_TO_KMH, NEUTRAL_BYTE, NM_TO_LBFT, optimizeDynoSetup, optimizeSetup, parseGameData,
   readSlotDyno, setSetupTuning, SETUP_NAMES, SETUP_SIZE, TURBO_OFF,
   type CurveKind, type CurvePoint, type DynoEvent, type DynoResult, type GameData, type Gearing, type ScalarRow, type TuningBand,
 } from '../model/dyno.js';
@@ -841,6 +841,81 @@ export function EditorController($scope: EditorScope): void {
         rebuildDyno();
       });
     }, 30);
+  };
+
+  /** Apply the top-speed objective to every supported filled garage slot and all five setups. */
+  $scope.ultimateTuneAll = function (): void {
+    const view = $scope.tuning.dyno;
+    if (!data || !game || view.busy) {
+      setStatus('error', 'Load a career save and GLOBAL\\\\GLOBALB.BUN before tuning all cars.');
+      return;
+    }
+    if (!confirm('Create a top-speed tuning draft for every supported filled car and all five setups?\\n\\nOnly existing installed parts and in-game gear ranges are used. The original save is unchanged until you download. Keep a backup.')) return;
+
+    const source = data;
+    const sourceGame = game;
+    let next: Uint8Array<ArrayBufferLike> = source.slice();
+    const jobs: { slot: number; setup: number; model: DynoModel; bytes: Uint8Array; carName: string }[] = [];
+    const completed = new Set<number>();
+    const skippedSlots: string[] = [];
+    let successfulSetups = 0;
+    const topBySlot = new Map<number, number>();
+
+    for (let slot = 0; slot < slotCount(source); slot++) {
+      if (!isSlotUsed(source, slot) || isSlotLocked(source, slot)) { skippedSlots.push(`Slot ${slot + 1}: empty or locked`); continue; }
+      const sd = readSlotDyno(source, slot);
+      if (TRAFFIC_CARS.some((car) => car.hash === sd.hash)) { skippedSlots.push(`Slot ${slot + 1}: experimental traffic car`); continue; }
+      const car = findCar(game, sd.hash);
+      if (!car) { skippedSlots.push(`Slot ${slot + 1}: car not found in GLOBALB.BUN`); continue; }
+      const model = new DynoModel(game, car, sd.installed, sd.uniques);
+      if (!model.ecuTunable && !model.turboTunable && !model.gearingParameters.length) {
+        skippedSlots.push(`Slot ${slot + 1}: no supported tuning parts`);
+        continue;
+      }
+      for (let setup = 0; setup < SETUP_NAMES.length; setup++) {
+        jobs.push({ slot, setup, model, bytes: sd.setups[setup], carName: car.name });
+      }
+    }
+
+    if (!jobs.length) {
+      setStatus('error', 'No supported filled cars were available. Check the save, installed parts and GLOBALB.BUN.');
+      return;
+    }
+
+    const totalJobs = jobs.length;
+    view.busy = true;
+    setStatus('', `Preparing top-speed tunes: 0 / ${totalJobs} setups…`);
+    const runNext = (): void => {
+      if (data !== source || game !== sourceGame) {
+        view.busy = false;
+        setStatus('error', 'The save changed while tuning was running. The unfinished batch was discarded.');
+        return;
+      }
+      const job = jobs.shift();
+      if (!job) {
+        view.busy = false;
+        if (!completed.size) {
+          setStatus('error', 'No setup could be optimized. The save was not changed.');
+          return;
+        }
+        applyResult(next);
+        const notes = Array.from(topBySlot, ([slot, speed]) => `slot ${slot + 1}: ${Math.round(speed)} km/h`);
+        setStatus('success', `Top-speed optimization applied to ${completed.size} cars (${successfulSetups}/${totalJobs} setups optimized); ${skippedSlots.length} slots/setups skipped. Simulated estimates: ${notes.join(' | ')}. This does not guarantee 350 km/h; the game's physics, installed parts and speed limiter still apply. Download to save.`);
+        return;
+      }
+      try {
+        const result = optimizeSetup(job.model, job.bytes, 'top', true);
+        next = setSetupTuning(next, job.slot, job.setup as DynoEvent, result.setup, true, false);
+        completed.add(job.slot);
+        successfulSetups++;
+        topBySlot.set(job.slot, Math.max(topBySlot.get(job.slot) ?? 0, result.after.topSpeed * MPH_TO_KMH));
+      } catch (err) {
+        skippedSlots.push(`Slot ${job.slot + 1} / ${SETUP_NAMES[job.setup]}: ${errorMessage(err)}`);
+      }
+      setStatus('', `Preparing top-speed tunes: ${successfulSetups} / ${totalJobs} setups optimized…`);
+      setTimeout(() => $scope.$apply(runNext), 0);
+    };
+    setTimeout(() => $scope.$apply(runNext), 30);
   };
 
   $scope.applyDyno = function (): void {

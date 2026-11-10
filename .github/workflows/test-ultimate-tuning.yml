@@ -1,0 +1,22 @@
+name: Test Ultimate 350 Tuning
+
+on:
+  push:
+    branches: [ultimate-350-tuning]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
