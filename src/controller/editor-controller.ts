@@ -17,7 +17,7 @@ import { TRAFFIC_CARS } from '../data/traffic-cars.js';
 import { setSlotTrafficCar } from '../model/slots.js';
 import { colorPalettes, isVisualColorSlot, parseVisualData, readVisual, VISUAL_SLOTS, VisualCatalog } from '../model/visual.js';
 import {
-  CURVE_POINTS, DynoModel, ECU_OFF, findCar, KW_TO_HP, MPH_TO_KMH, NEUTRAL_BYTE, NM_TO_LBFT, optimizeDynoSetup, parseGameData,
+  CURVE_POINTS, DynoModel, ECU_OFF, findCar, KW_TO_HP, MPH_TO_KMH, NEUTRAL_BYTE, NM_TO_LBFT, optimizeDynoSetup, optimizeSetup, parseGameData,
   readSlotDyno, setSetupTuning, SETUP_NAMES, SETUP_SIZE, TURBO_OFF,
   type CurveKind, type CurvePoint, type DynoEvent, type DynoResult, type GameData, type Gearing, type ScalarRow, type TuningBand,
 } from '../model/dyno.js';
@@ -841,6 +841,41 @@ export function EditorController($scope: EditorScope): void {
         rebuildDyno();
       });
     }, 30);
+  };
+
+  /** Apply the top-speed objective to every supported filled garage slot and all five setups. */
+  $scope.ultimateTuneAll = function (): void {
+    if (!data || !game || $scope.tuning.dyno.busy) {
+      setStatus('error', 'Load a career save and GLOBAL\\\\GLOBALB.BUN before tuning all cars.');
+      return;
+    }
+    if (!confirm('Create a top-speed tuning draft for every supported car and all five setups?\\n\\nOnly existing installed parts and in-game gear ranges are used. Original save remains unchanged until you download the edited save. Back up your save first.')) return;
+    let next = data.slice();
+    let tuned = 0, skipped = 0;
+    const notes: string[] = [];
+    for (let slot = 0; slot < slotCount(next); slot++) {
+      if (!isSlotUsed(next, slot) || isSlotLocked(next, slot)) { skipped++; continue; }
+      const sd = readSlotDyno(next, slot);
+      if (TRAFFIC_CARS.some((car) => car.hash === sd.hash)) { skipped++; continue; }
+      const car = findCar(game, sd.hash);
+      if (!car) { skipped++; continue; }
+      const model = new DynoModel(game, car, sd.installed, sd.uniques);
+      if (!model.ecuTunable && !model.turboTunable && !model.gearingParameters.length) { skipped++; continue; }
+      let slotTop = 0;
+      for (let setup = 0; setup < SETUP_NAMES.length; setup++) {
+        const result = optimizeSetup(model, sd.setups[setup], 'top', true);
+        next = setSetupTuning(next, slot, setup as DynoEvent, result.setup, true, false);
+        slotTop = Math.max(slotTop, result.after.topSpeed * MPH_TO_KMH);
+      }
+      tuned++;
+      notes.push(`${car.name}: ${Math.round(slotTop)} km/h simulated max`);
+    }
+    if (!tuned) {
+      setStatus('error', 'No supported filled cars were available. Check the save, installed parts and GLOBALB.BUN.');
+      return;
+    }
+    applyResult(next);
+    setStatus('success', `Top-speed tuning prepared for ${tuned} cars across all five setups; ${skipped} slots skipped. Dyno figures are estimates, not a guarantee of 350 km/h. ${notes.join(' | ')} Download to save.`);
   };
 
   $scope.applyDyno = function (): void {
