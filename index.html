@@ -274,6 +274,12 @@
       </div>
       <div class="dyno-panel" ng-if="tuning.tab === 'DYNO'">
         <p class="muted" ng-if="tuning.dyno.blocked">{{ tuning.dyno.blocked }}</p>
+        <div class="dyno-controls">
+          <button type="button" class="profile-action-btn" ng-click="ultimateTuneAll()" ng-disabled="tuning.dyno.busy || !tuning.dyno.gameName">
+            ULTIMATE TOP SPEED — ALL CARS
+          </button>
+          <span class="muted">Optimizes every supported unlocked garage car across all five setups.</span>
+        </div>
         <div ng-if="tuning.dyno.rows.length">
           <div class="dyno-setups" role="tablist" aria-label="Dyno setups">
             <button type="button" role="tab" ng-repeat="name in tuning.dyno.setupNames track by $index"
@@ -282,9 +288,6 @@
           </div>
           <div class="dyno-controls">
             <strong>{{ tuning.dyno.carName }}</strong>
-            <button type="button" class="profile-action-btn" ng-click="ultimateTuneAll()" ng-disabled="tuning.dyno.busy || !tuning.dyno.gameName">
-              ULTIMATE TOP SPEED — ALL CARS
-            </button>
             <label class="dyno-gearing">
               <input type="checkbox" ng-model="tuning.dyno.optimizeGearing" ng-disabled="tuning.dyno.busy">
               Optimize gearing &amp; shift spacing
