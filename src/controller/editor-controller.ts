@@ -853,10 +853,12 @@ export function EditorController($scope: EditorScope): void {
     if (!confirm('Create a top-speed tuning draft for every supported filled car and all five setups?\\n\\nOnly existing installed parts and in-game gear ranges are used. The original save is unchanged until you download. Keep a backup.')) return;
 
     const source = data;
+    const sourceGame = game;
     let next = source.slice();
     const jobs: { slot: number; setup: number; model: DynoModel; bytes: Uint8Array; carName: string }[] = [];
     const completed = new Set<number>();
     const skippedSlots: string[] = [];
+    let successfulSetups = 0;
     const topBySlot = new Map<number, number>();
 
     for (let slot = 0; slot < slotCount(source); slot++) {
@@ -880,10 +882,11 @@ export function EditorController($scope: EditorScope): void {
       return;
     }
 
+    const totalJobs = jobs.length;
     view.busy = true;
-    setStatus('', `Preparing top-speed tunes: 0 / ${jobs.length} setups…`);
+    setStatus('', `Preparing top-speed tunes: 0 / ${totalJobs} setups…`);
     const runNext = (): void => {
-      if (data !== source) {
+      if (data !== source || game !== sourceGame) {
         view.busy = false;
         setStatus('error', 'The save changed while tuning was running. The unfinished batch was discarded.');
         return;
@@ -897,18 +900,19 @@ export function EditorController($scope: EditorScope): void {
         }
         applyResult(next);
         const notes = Array.from(topBySlot, ([slot, speed]) => `slot ${slot + 1}: ${Math.round(speed)} km/h`);
-        setStatus('success', `Top-speed optimization applied to ${completed.size} cars (${completed.size * SETUP_NAMES.length} setups attempted); ${skippedSlots.length} slots skipped. Simulated estimates: ${notes.join(' | ')}. This does not guarantee 350 km/h; the game's physics, installed parts and speed limiter still apply. Download to save.`);
+        setStatus('success', `Top-speed optimization applied to ${completed.size} cars (${successfulSetups}/${totalJobs} setups optimized); ${skippedSlots.length} slots/setups skipped. Simulated estimates: ${notes.join(' | ')}. This does not guarantee 350 km/h; the game's physics, installed parts and speed limiter still apply. Download to save.`);
         return;
       }
       try {
         const result = optimizeSetup(job.model, job.bytes, 'top', true);
         next = setSetupTuning(next, job.slot, job.setup as DynoEvent, result.setup, true, false);
         completed.add(job.slot);
+        successfulSetups++;
         topBySlot.set(job.slot, Math.max(topBySlot.get(job.slot) ?? 0, result.after.topSpeed * MPH_TO_KMH));
       } catch (err) {
         skippedSlots.push(`Slot ${job.slot + 1} / ${SETUP_NAMES[job.setup]}: ${errorMessage(err)}`);
       }
-      setStatus('', `Preparing top-speed tunes: ${jobs.length ? jobs.length + 1 : 1} remaining…`);
+      setStatus('', `Preparing top-speed tunes: ${successfulSetups} / ${totalJobs} setups optimized…`);
       setTimeout(() => $scope.$apply(runNext), 0);
     };
     setTimeout(() => $scope.$apply(runNext), 30);
