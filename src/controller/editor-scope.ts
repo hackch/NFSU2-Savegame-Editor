@@ -258,6 +258,7 @@ export interface EditorScope extends angular.IScope {
   resetScalar(param: number): void;
   selectSetup(setup: DynoEvent): void;
   optimizeDyno(): void;
+  ultimateTuneAll(): void;
   applyDyno(): void;
   discardDyno(): void;
   selectCurve(kind: DynoTab): void;
