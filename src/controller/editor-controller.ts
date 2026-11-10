@@ -854,7 +854,7 @@ export function EditorController($scope: EditorScope): void {
 
     const source = data;
     const sourceGame = game;
-    let next = source.slice();
+    let next: Uint8Array<ArrayBufferLike> = source.slice();
     const jobs: { slot: number; setup: number; model: DynoModel; bytes: Uint8Array; carName: string }[] = [];
     const completed = new Set<number>();
     const skippedSlots: string[] = [];
