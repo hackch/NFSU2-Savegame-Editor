@@ -165,6 +165,8 @@ export interface DynoView {
   gear: number;
   drive: GearChart | null;
   scalars: ScalarRow[];
+  transmissionDonorSlot: number;
+
 }
 
 /** Top-level tuning tab. */
