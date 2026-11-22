@@ -580,6 +580,9 @@ export function EditorController($scope: EditorScope): void {
 
   $scope.openTuning = function (slot: number): void {
     $scope.tuning.slot = slot;
+    const gto = $scope.slots.find((candidate) => candidate.index !== slot
+      && candidate.car?.name.toLowerCase().includes('pontiac gto'));
+    if (gto) $scope.tuning.dyno.transmissionDonorSlot = gto.index;
     $scope.tuning.open = true;
     $scope.tuning.tab = 'PERF';
     $scope.tuning.sub = TUNING_PERF_CATEGORIES[0].code;
