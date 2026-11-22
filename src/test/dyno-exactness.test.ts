@@ -68,3 +68,32 @@ test('interactive gear writer encodes bytes with the float32 writer of the load'
     }
   }
 });
+
+
+test('changing final drive preserves custom forward ratios within the new legal ranges', { skip: SKIP }, () => {
+  const game = parseGameData(new Uint8Array(readFileSync(GAME_BUN)));
+  const car = findCar(game, 0x4b10070a);
+  assert.ok(car, 'Peugeot 106 type hash');
+  const installed = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,0,1,0,0,1,0,0,1,0,0,1,0].map((b) => b !== 0);
+  const model = new DynoModel(game, car, installed, new Array<number>(9).fill(0));
+  let setup = new Uint8Array(41).fill(100);
+  const first = model.gearing(setup)!;
+  const secondGear = first.rows.find((r) => r.param === 11);
+  const finalDrive = first.rows.find((r) => r.param === 9);
+  assert.ok(secondGear && finalDrive);
+  setup = model.withGearRatio(setup, 11, secondGear.ratio * 0.93);
+  const before = model.gearing(setup)!;
+  const oldRatios = new Map(before.rows.filter((r) => r.param >= 10).map((r) => [r.param, r.ratio]));
+  const fd = before.rows.find((r) => r.param === 9)!;
+  const targetFd = Math.min(fd.max - 1e-4, fd.ratio + (fd.max - fd.min) * 0.08);
+  assert.ok(targetFd > fd.ratio, 'test final-drive change must be upward');
+  const changed = model.withGearRatio(setup, 9, targetFd);
+  const after = model.gearing(changed)!;
+  for (const row of after.rows.filter((r) => r.param >= 10)) {
+    const prior = oldRatios.get(row.param)!;
+    const expected = Math.min(Math.max(prior, row.min), row.max);
+    assert.ok(Math.abs(row.ratio - expected) < 0.015,
+      `${row.label}: ${row.ratio} should preserve/clamp prior ratio ${prior} into [${row.min}, ${row.max}]`);
+  }
+});
