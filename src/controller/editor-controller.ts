@@ -18,7 +18,7 @@ import { setSlotTrafficCar } from '../model/slots.js';
 import { colorPalettes, isVisualColorSlot, parseVisualData, readVisual, VISUAL_SLOTS, VisualCatalog } from '../model/visual.js';
 import {
   CURVE_POINTS, DynoModel, ECU_OFF, findCar, KW_TO_HP, MPH_TO_KMH, NEUTRAL_BYTE, NM_TO_LBFT, optimizeDynoSetup, parseGameData,
-  readSlotDyno, setSetupTuning, SETUP_NAMES, SETUP_SIZE, TURBO_OFF,
+  readSlotDyno, setSetupTuning, SETUP_NAMES, SETUP_SIZE, TURBO_OFF, transplantTransmission,
   type CurveKind, type CurvePoint, type DynoEvent, type DynoResult, type GameData, type Gearing, type ScalarRow, type TuningBand,
 } from '../model/dyno.js';
 import type {
@@ -93,7 +93,7 @@ export function EditorController($scope: EditorScope): void {
     dyno: {
       gameName: '', gameError: '', setup: 1, setupNames: SETUP_NAMES, strategy: '', optimizeGearing: false,
       carName: '', blocked: '', busy: false, rows: [], hasProposal: false,
-      curveTabs: [], curve: 'ecu', cheat: false, point: 0, chart: null, gear: 0, drive: null, scalars: [],
+      curveTabs: [], curve: 'ecu', cheat: false, point: 0, chart: null, gear: 0, drive: null, scalars: [], transmissionDonorSlot: 0,
     },
   };
 
@@ -841,6 +841,28 @@ export function EditorController($scope: EditorScope): void {
         rebuildDyno();
       });
     }, 30);
+  };
+
+  $scope.transplantTransmission = function (): void {
+    if (!data || !game) {
+      setStatus('error', 'Load the career save and matching GLOBAL\\\\GLOBALB.BUN first.');
+      return;
+    }
+    const donorSlot = $scope.tuning.dyno.transmissionDonorSlot;
+    const recipientSlot = $scope.tuning.slot;
+    const donorName = $scope.slots[donorSlot]?.car?.name ?? `Slot ${donorSlot + 1}`;
+    const recipientName = $scope.slots[recipientSlot]?.car?.name ?? `Slot ${recipientSlot + 1}`;
+    if (!confirm(`Copy the installed transmission package and all six forward gear ratios from ${donorName} to ${recipientName}?\\n\\nThis updates the recipient's differential/LSD/clutch/6-speed flags, transmission unique flag and all five dyno setups. The recipient's Final Gear, engine and other upgrades stay unchanged. Back up your save first.`)) return;
+    try {
+      const result = transplantTransmission(data, donorSlot, recipientSlot, game);
+      applyResult(result.data);
+      const note = result.clamped.length
+        ? ` ${result.clamped.length} gear/setup values were limited by the recipient's legal ranges.`
+        : ' All six ratios transferred without editor-side range clamping.';
+      setStatus('success', `Transmission transplant applied: ${donorName} → ${recipientName}. ${result.copiedGears} gear values copied across five setups.${note} Download and test in game.`);
+    } catch (err) {
+      setStatus('error', errorMessage(err));
+    }
   };
 
   $scope.applyDyno = function (): void {
