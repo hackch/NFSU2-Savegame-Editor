@@ -1065,7 +1065,23 @@ export class DynoModel {
     };
     if (!this.defs.has(param) || !Number.isFinite(ratio)) return out;
     if (param === 9) {
+      // Changing final drive changes every forward gear's legal ratio range. Preserve the
+      // current physical ratios, not their old normalized slider bytes, then encode them
+      // against the updated ranges. Otherwise the same bytes are decoded at new defaults.
+      const gearRatios = new Map<number, number>();
+      for (let gear = 10; gear <= 15; gear++) {
+        if (this.defs.has(gear)) gearRatios.set(gear, g(p, 0x1b0 + gear * 4));
+      }
       encode(9, ratio);
+      const updated = this.tuned(out);
+      for (let gear = 10; gear <= 15; gear++) {
+        const current = gearRatios.get(gear);
+        if (current === undefined || !this.defs.has(gear)) continue;
+        this.setGear(updated, current, gear);
+      }
+      for (let gear = 10; gear <= 15; gear++) {
+        if (this.defs.has(gear)) encode(gear, g(updated, 0x1b0 + gear * 4));
+      }
       return out;
     }
     this.setGear(p, ratio, param);
