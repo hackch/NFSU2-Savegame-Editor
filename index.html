@@ -283,6 +283,16 @@
           <div class="dyno-controls">
             <strong>{{ tuning.dyno.carName }}</strong>
             <label class="dyno-gearing">
+              GTO transmission donor slot
+              <select ng-model="tuning.dyno.transmissionDonorSlot"
+                      ng-options="slot.index as ('Slot ' + (slot.index + 1) + ' — ' + (slot.car ? slot.car.name : 'Empty')) for slot in slots"
+                      ng-disabled="tuning.dyno.busy"></select>
+            </label>
+            <button type="button" class="profile-action-btn" ng-click="transplantTransmission()"
+                    ng-disabled="tuning.dyno.busy || tuning.dyno.transmissionDonorSlot === tuning.slot">
+              Transplant donor transmission to this car
+            </button>
+            <label class="dyno-gearing">
               <input type="checkbox" ng-model="tuning.dyno.optimizeGearing" ng-disabled="tuning.dyno.busy">
               Optimize gearing &amp; shift spacing
             </label>
