@@ -628,7 +628,7 @@ export class DynoModel {
     return offsets.reduce((sum, off) => sum + g(p, off), 0) / offsets.length;
   }
 
-  private absRange(p: Phys, param: number): [number, number] {
+    private absRange(p: Phys, param: number): [number, number] {
     if (SCALARS.some(([id]) => id === param)) return this.scalarAbsRange(param);
     const c = this.car;
     const rec = this.tuneRecords.get(param);
@@ -649,16 +649,19 @@ export class DynoModel {
       }
       lo = Math.min(...vals); hi = Math.max(...vals);
     }
+    // Type 0/1 records are applied once in range(): type 1 intersects the
+    // absolute range with default+[f8,fC], while type 0 adjusts its lower
+    // endpoint from the default. Expanding lo/hi here as well applies those
+    // limits twice and can produce an invalid final-drive minimum.
     if (rec) {
       if (rec.type === 2 || rec.type === 3) [lo, hi] = [(hi - lo) * rec.f8 + lo, (hi - lo) * rec.fC + hi];
-      else if (rec.type === 0 || rec.type === 1) [lo, hi] = [lo + rec.f8, hi + rec.fC];
       else if (rec.type === 4) [lo, hi] = [Math.min(lo, rec.f8), Math.max(hi, rec.fC)];
     }
     if (param === P_ECU || param === P_TURBO) [lo, hi] = [Math.max(lo, 0), Math.max(hi, 0)];
     return [lo, hi];
   }
 
-  private caps(p: Phys, param: number, i: number, lo: number, hi: number): [number, number] {
+private caps(p: Phys, param: number, i: number, lo: number, hi: number): [number, number] {
     const defs = this.curveDefs.get(param) as number[];
     hi = Math.min(hi, Math.max(0, ...defs));
     const idle = g(p, 0x1f0), red = g(p, 0x1f8);
