@@ -248,6 +248,73 @@ export interface SlotDyno {
   setups: Uint8Array[];
 }
 
+/** Result of copying a donor's installed transmission package and physical gear ratios to another car. */
+export interface TransmissionTransplantResult {
+  data: Uint8Array;
+  copiedGears: number;
+  clamped: { setup: string; gear: string; donor: number; recipient: number }[];
+}
+
+/**
+ * Copies transmission performance flags (differential, LSD, clutch and 6-speed upgrade),
+ * the transmission unique flag, and the donor's physical forward ratios into all five
+ * recipient dyno setups. Recipient final drive, engine and non-transmission upgrades remain.
+ *
+ * Requires both cars to have six active forward gears after the donor transmission package
+ * is installed. This is a save-level transplant; game acceptance still requires in-game testing.
+ */
+export function transplantTransmission(save: Uint8Array, donorSlot: number, recipientSlot: number,
+  game: GameData): TransmissionTransplantResult {
+  if (donorSlot === recipientSlot) throw new RangeError('Choose two different car slots.');
+  const donor = readSlotDyno(save, donorSlot), recipient = readSlotDyno(save, recipientSlot);
+  const donorCar = findCar(game, donor.hash), recipientCar = findCar(game, recipient.hash);
+  if (!donorCar || !recipientCar) throw new RangeError('Both cars must exist in the loaded GLOBALB.BUN.');
+  if (donor.installed.length !== PERF_COUNT || recipient.installed.length !== PERF_COUNT) {
+    throw new RangeError('Unsupported performance-part layout.');
+  }
+
+  // Transmission category TR occupies installed item IDs 6–11; unique index 1 is its
+  // separate performance upgrade. Copy the exact donor flags, not unrelated upgrades.
+  const out = save.slice();
+  const donorBase = slotBase(donorSlot), recipientBase = slotBase(recipientSlot);
+  for (let i = 6; i <= 11; i++) out[recipientBase + INSTALLED_REL + i] = out[donorBase + INSTALLED_REL + i];
+  dataView(out).setUint32(recipientBase + UNIQUE_REL + 4, donor.uniques[1], true);
+
+  const next = readSlotDyno(out, recipientSlot);
+  const donorModel = new DynoModel(game, donorCar, donor.installed, donor.uniques);
+  const recipientModel = new DynoModel(game, recipientCar, next.installed, next.uniques);
+  const donorParams = donorModel.gearingParameters.filter((p) => p >= 10 && p <= 15);
+  const recipientParams = recipientModel.gearingParameters.filter((p) => p >= 10 && p <= 15);
+  if (donorParams.length !== 6 || recipientParams.length !== 6) {
+    throw new RangeError('Both donor and recipient must have a six-speed transmission after the transplant.');
+  }
+
+  const clamped: TransmissionTransplantResult['clamped'] = [];
+  let copiedGears = 0;
+  for (let setup = 0; setup < SETUP_COUNT; setup++) {
+    const donorGearing = donorModel.gearing(donor.setups[setup]);
+    if (!donorGearing) throw new RangeError('The donor has no editable transmission ratios.');
+    const source = new Map(donorGearing.rows.filter((r) => r.param >= 10 && r.param <= 15).map((r) => [r.param, r.ratio]));
+    let target = next.setups[setup].slice();
+    for (const param of recipientParams) {
+      const ratio = source.get(param);
+      if (ratio === undefined) continue;
+      target = recipientModel.withGearRatio(target, param, ratio);
+      copiedGears++;
+    }
+    const actual = recipientModel.gearing(target);
+    if (!actual) throw new RangeError('The recipient transmission could not be rebuilt.');
+    for (const row of actual.rows.filter((r) => r.param >= 10 && r.param <= 15)) {
+      const wanted = source.get(row.param);
+      if (wanted !== undefined && Math.abs(wanted - row.ratio) > 0.005) {
+        clamped.push({ setup: SETUP_NAMES[setup], gear: row.label, donor: wanted, recipient: row.ratio });
+      }
+    }
+    out.set(target.subarray(9, 16), setupOffset(recipientSlot, setup) + 9);
+  }
+  return { data: out, copiedGears, clamped };
+}
+
 /**
  * Parses car records, upgrade packages and tuning records from GLOBALB.BUN.
  * @param bytes File contents.
