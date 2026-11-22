@@ -77,7 +77,7 @@ test('changing final drive preserves custom forward ratios within the new legal 
   const installed = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
     1,1,1,1,1,1,1,0,1,0,0,1,0,0,1,0,0,1,0].map((b) => b !== 0);
   const model = new DynoModel(game, car, installed, new Array<number>(9).fill(0));
-  let setup = new Uint8Array(41).fill(100);
+  let setup: Uint8Array<ArrayBufferLike> = new Uint8Array(41).fill(100);
   const first = model.gearing(setup)!;
   const secondGear = first.rows.find((r) => r.param === 11);
   const finalDrive = first.rows.find((r) => r.param === 9);
