@@ -310,7 +310,7 @@ export function transplantTransmission(save: Uint8Array, donorSlot: number, reci
         clamped.push({ setup: SETUP_NAMES[setup], gear: row.label, donor: wanted, recipient: row.ratio });
       }
     }
-    out.set(target.subarray(9, 16), setupOffset(recipientSlot, setup) + 9);
+    out.set(target.subarray(10, 16), setupOffset(recipientSlot, setup) + 10);
   }
   return { data: out, copiedGears, clamped };
 }
