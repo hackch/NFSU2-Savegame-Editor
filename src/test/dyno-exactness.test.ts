@@ -68,3 +68,17 @@ test('interactive gear writer encodes bytes with the float32 writer of the load'
     }
   }
 });
+
+test('2.000 final-drive mod keeps the lower bound at 2.000 (no double application)', { skip: SKIP }, () => {
+  const game = parseGameData(new Uint8Array(readFileSync(GAME_BUN)));
+  const car = findCar(game, 0x4b10070a);
+  assert.ok(car, 'Peugeot 106 type hash');
+  const installed = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    1,1,1,1,1,1,1,0,1,0,0,1,0,0,1,0,0,1,0].map((b) => b !== 0);
+  const model = new DynoModel(game, car, installed, new Array<number>(9).fill(0));
+  const neutral = new Uint8Array(41).fill(100);
+  const finalDrive = model.gearing(neutral)?.rows.find((row) => row.param === 9);
+  assert.ok(finalDrive, 'final-drive tuning row is unlocked');
+  assert.ok(Math.abs(finalDrive.min - 2.0) < 1e-5,
+    `expected 2.000 minimum, got ${finalDrive.min}`);
+});
